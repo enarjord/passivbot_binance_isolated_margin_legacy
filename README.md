@@ -44,8 +44,11 @@ it maintains up to 4 orders per market pair
 
 
 one long entry: small bid
+
 one long exit: big ask
+
 one short entry: small ask
+
 one short exit: big bid
 
 
