@@ -78,18 +78,6 @@ def sort_and_drop_duplicates_by_index(df1: pd.DataFrame, df2: pd.DataFrame = Non
     return df.loc[~df.index.duplicated()]
 
 
-def no_gaps_in_index(df: pd.DataFrame, return_gaps: bool = False) -> bool:
-    diffs = pd.Series(df.index, index=df.index).diff().dropna()
-    target_diff = diffs.value_counts().idxmax()
-    if (diffs != target_diff).any():
-        gaps = diffs[diffs != target_diff]
-        print('not integrous. n gaps: {}'.format(len(gaps)))
-        if return_gaps:
-            return gaps
-        return False
-    return True
-
-
 def remove_elem(lst: [], elem):
     '''
     returns new list, first occurrence of elem removed
@@ -99,32 +87,7 @@ def remove_elem(lst: [], elem):
         return lst[:i] + lst[i + 1:]
     except(ValueError):
         return lst
-
-
-def calc_n_days(df: pd.DataFrame, first_and_last_index: tuple = None) -> float:
-    if first_and_last_index is not None:
-        if len(str(int(first_and_last_index[0]))) == 13:
-            return (first_and_last_index[-1] - first_and_last_index[0]) / 1000 / 60 / 60 / 24
-        elif len(str(int(first_and_last_index[0]))) == 10:
-            return (first_and_last_index[-1] - first_and_last_index[0]) / 60 / 60 / 24
-
-    if type(df) == pd.Series:
-        return calc_n_days(None, (df.index[0], df.index[-1]))
-    elif type(df) == pd.DataFrame:
-        candidates = ['time', 'ts', 'timestamp']
-        for candidate in candidates:
-            for cln in df.columns:
-                if df.index.name is None:
-                    return calc_n_days(None, (df.index[0], df.index[-1]))
-                if candidate == cln.lower():
-                    return calc_n_days(None, (df[cln].iloc[0], df[cln].iloc[-1]))
-                if df.index.name.lower() == candidate:
-                    return calc_n_days(None, (df.index[0], df.index[-1]))
-
-
-def calc_avg_daily_gain(principal: float, result: float, n_days: float, rounding: int = 8) -> float:
-    return round((result / principal) ** (1 / n_days), rounding)
-
+    
 
 def sort_dict_keys(d):
     if type(d) == list:
