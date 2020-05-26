@@ -38,22 +38,23 @@ it maintains up to 4 orders per market pair
 
 
 one long entry: small bid
-
 one long exit: big ask
-
 one short entry: small ask
-
 one short exit: big bid
 
 
 price of long exit is sum(all long entries cost) / sum(all long entries amount) * 1.0025 (default settings)
+
 price of short exit is inversely sum(all short entries cost) / sum(all short entries amount) * 0.9975 (default settings)
 
 it will automatically analyze past trades and make appropriate long and short exits
 
 each market pair's volume is throttled by the rolling past 3 hours (default settings) same side volume:
+
 if (past 3 hours long buy volume) > threshold: don't place long bid
+
 if (past 3 hours short sell volume) > threshold: don't place short ask
+
 
 if an exit is taken, will reset the correspondig side's timer
 
