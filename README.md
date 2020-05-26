@@ -38,6 +38,8 @@ it is designed to benefit regardless of price moving up or down
 
 it will automatically place and delete orders, borrow and repay
 
+by default it will accumulate and maintain > 50 BNB for vip1 status
+
 it will only make orders, never (except by accident due to extreme volatility or exchange latency) take orders
 
 it maintains up to 4 orders per market pair
