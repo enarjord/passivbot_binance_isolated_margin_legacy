@@ -33,7 +33,9 @@ against BTC
 it will long all coins and short all coins except BNB due to high interest rate
 
 the bot's goal is to accumulate BTC, both shorting and longing all coins simultaneously
+
 it is designed to benefit regardless of price moving up or down
+
 it will automatically place and delete orders, borrow and repay
 
 it will only make orders, never (except by accident due to extreme volatility or exchange latency) take orders
