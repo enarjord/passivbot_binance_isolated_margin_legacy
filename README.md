@@ -10,7 +10,7 @@ dependencies, install via pip:
 pip3 install ccxt pandas numpy python-binance ciso8601
 
 
-binance account needs margin enabled
+binance account needs margin enabled,
 works with both 3x and 5x margin
 
 
@@ -36,10 +36,15 @@ it will automatically place and delete orders, borrow and repay
 it will only make orders, never (except by accident due to extreme volatility or exchange latency) take orders
 it maintains up to 4 orders per market pair
 
+
 one long entry: small bid
+
 one long exit: big ask
+
 one short entry: small ask
+
 one short exit: big bid
+
 
 price of long exit is sum(all long entries cost) / sum(all long entries amount) * 1.0025 (default settings)
 price of short exit is inversely sum(all short entries cost) / sum(all short entries amount) * 0.9975 (default settings)
