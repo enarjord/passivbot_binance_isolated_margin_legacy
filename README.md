@@ -13,6 +13,7 @@ ccxt pandas numpy python-binance ciso8601
 binance account needs margin enabled,
 works with both 3x and 5x margin
 
+------------------------------------------------------------------
 
 usage:
 add api key secret to api_key_secret/binance/{user}.json:
