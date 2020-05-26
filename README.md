@@ -5,9 +5,9 @@ trading bot running on binance margin
 requires python >= 3.8
 
 
-dependencies, install via pip:
+dependencies:
 
-pip3 install ccxt pandas numpy python-binance ciso8601
+ccxt pandas numpy python-binance ciso8601
 
 
 binance account needs margin enabled,
