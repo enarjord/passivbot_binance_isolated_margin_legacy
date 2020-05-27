@@ -38,6 +38,7 @@ otherwise, the bot will use default settings
 
 
 run in terminal:
+
 `passivbop.py your_user_name`
 
 ------------------------------------------------------------------
