@@ -23,7 +23,8 @@ def prepare_bot(exchange: str, user: str):
     settings = load_settings(user)
     commons = Commons(user, settings['ema_spans_minutes'])
     all_coins = set(flatten([s.split('/') for s in commons.cc.markets]))
-    settings['coins'] = [c for c in settings['coins'] if c in all_coins]
+    settings['coins'] = [c for c in sorted(set(settings['coins_long'] + settings['coins_shrt']))
+                         if c in all_coins]
     all_margin_pairs = [f"{e['base']}/{e['quote']}" for e in commons.cc.sapi_get_margin_allpairs()]
     settings['symbols'] = [s for c in settings['coins']
                            if (s := f"{c}/{settings['quot']}") in all_margin_pairs]
