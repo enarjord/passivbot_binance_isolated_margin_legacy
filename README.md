@@ -17,11 +17,23 @@ works with both 3x and 5x margin
 ------------------------------------------------------------------
 
 usage:
-add api key secret to api_key_secret/binance/{user}.json:
+add api key and secret as json file in dir
+
+api_key_secret/binance/your_user_name.json
+
+formatted like this:
 ["KEY", "SECRET"]
 
+
+if using non-default settings, make a copy of
+
+settings/binance/default.json
+
+and rename the copy your_user_name.json
+
+
 run in terminal:
-passivbop.py {user}
+passivbop.py your_user_name
 
 ------------------------------------------------------------------
 
