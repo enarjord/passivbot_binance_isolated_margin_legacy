@@ -33,7 +33,7 @@
     "account_equity_pct_per_hour": 0.0045,
     "hours_rolling_small_trade_window": 3.0,
     "bnb_buffer": 50.3,
-    "max_memory_span_millis": 5184000000,
+    "max_memory_span_days": 120,
     "ema_spans_minutes": [
         58,
         70,
