@@ -20,10 +20,12 @@ class Vwap:
         self.hyperparams['profit_pct_plus'] = (1 + hyperparams['profit_pct'])
         self.hyperparams['profit_pct_minus'] = (1 - hyperparams['profit_pct'])
         self.hyperparams['account_equity_pct_per_period'] = \
-            hyperparams['account_equity_pct_per_hour'] * hyperparams['hours_rolling_small_trade_window']
+            hyperparams['account_equity_pct_per_hour'] * \
+            hyperparams['hours_rolling_small_trade_window']
         self.hyperparams['millis_rolling_small_trade_window'] = \
             hyperparams['hours_rolling_small_trade_window'] * 60 * 60 * 1000
-        self.hyperparams['max_memory_span_millis'] = hyperparams['max_memory_span_days'] * 1000 * 60 * 60 * 24
+        self.hyperparams['max_memory_span_millis'] = \
+            hyperparams['max_memory_span_days'] * 1000 * 60 * 60 * 24
         self.user = hyperparams['user']
         self.symbols = hyperparams['symbols']
         self.symbols_set = set(self.symbols)
@@ -209,7 +211,8 @@ class Vwap:
                                 'insufficient funds; schedule balance update'])
                         self.time_keepers['update_balance'] = 0
                     else:
-                        print_(['ERROR', 'margin', symbol, future_result.exception(), fns, args_list])
+                        print_(['ERROR', 'margin', symbol, future_result.exception(),
+                                fns, args_list])
                 else:
                     self.try_wrapper(self.update_after_execution, (future_result.result(),))
             self.locks[symbol].release()
