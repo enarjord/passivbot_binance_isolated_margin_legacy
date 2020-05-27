@@ -1,6 +1,6 @@
 {
     "quot": "BTC",
-    "coins": [
+    "coins_long": [
         "ADA",
         "ATOM",
         "BAT",
@@ -27,6 +27,33 @@
         "XTZ",
         "ZEC"
     ],
+    "coins_shrt": [
+        "ADA",
+        "ATOM",
+        "BAT",
+        "BCH",
+        "DASH",
+        "EOS",
+        "ETC",
+        "ETH",
+        "IOST",
+        "IOTA",
+        "LINK",
+        "LTC",
+        "MATIC",
+        "NEO",
+        "ONT",
+        "QTUM",
+        "RVN",
+        "TRX",
+        "VET",
+        "XLM",
+        "XMR",
+        "XRP",
+        "XTZ",
+        "ZEC"
+    ],
+    "do_not_borrow": ["BNB"],
     "profit_pct": 0.0025,
     "account_equity_pct_per_trade": 0.0006,
     "account_equity_pct_per_hour": 0.0045,
