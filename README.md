@@ -47,7 +47,8 @@ run in terminal:
 about the settings:
 
     "quot": "BTC",                              # the coin to accumulate
-    "coins": ["ADA", "ATOM", "BAT", ...]        # coins to long/short. default is all margin enabled coins
+    "coins": ["ADA", "ATOM", "BAT", ...]        # coins to long/short.
+                                                # default is all margin enabled coins which have BTC as quote
     "profit_pct": 0.0025,                       # minimum target profit per long/short exit
                                                 #
                                                 # eg. if it over time spent total 0.01 BTC buying long a total of 200 coins,
