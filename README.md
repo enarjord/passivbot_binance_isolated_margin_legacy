@@ -8,7 +8,7 @@ requires python >= 3.8
 dependencies, install with pip:
 
 
-python3.8 -m pip install ccxt pandas python-binance ciso8601
+`python3.8 -m pip install ccxt pandas python-binance ciso8601`
 
 
 binance account needs margin enabled,
@@ -38,7 +38,7 @@ otherwise, the bot will use default settings
 
 
 run in terminal:
-passivbop.py your_user_name
+`passivbop.py your_user_name`
 
 ------------------------------------------------------------------
 
