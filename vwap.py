@@ -33,11 +33,16 @@ class Vwap:
         self.quot = hyperparams['quot']
         self.all_coins_set = set(self.coins + [self.quot])
         self.symbol_split = {symbol: symbol.split('/') for symbol in self.symbols}
-        self.do_shrt_sel = {symbol for symbol in self.symbols if 'BNB' not in symbol}
-        self.do_shrt_buy = {symbol for symbol in self.symbols if 'BNB' not in symbol}
-        self.do_long_buy = {symbol for symbol in self.symbols}
-        self.do_long_sel = {symbol for symbol in self.symbols}
-        self.do_borrow = {coin for coin in self.all_coins_set if coin != 'BNB'}
+        self.do_shrt_sel = {symbol for symbol in self.symbols
+                            if self.symbol_split[symbol][0] in hyperparams['coins_shrt']}
+        self.do_shrt_buy = {symbol for symbol in self.symbols
+                            if self.symbol_split[symbol][0] in hyperparams['coins_shrt']}
+        self.do_long_buy = {symbol for symbol in self.symbols
+                            if self.symbol_split[symbol][0] in hyperparams['coins_long']}
+        self.do_long_sel = {symbol for symbol in self.symbols
+                            if self.symbol_split[symbol][0] in hyperparams['coins_long']}
+        self.do_borrow = {coin for coin in self.all_coins_set
+                          if coin not in hyperparams['do_not_borrow']}
         self.nodash_to_dash_map = {symbol.replace('/', ''): symbol for symbol in self.symbols}
         self.balance = {}
         self.my_trades = {}
