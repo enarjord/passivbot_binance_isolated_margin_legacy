@@ -47,20 +47,25 @@ run in terminal:
 about the settings:
 
     "quot": "BTC",                              # the coin to accumulate
-    "coins": ["ADA", "ATOM", "BAT", ...]        # coins to long/short.
+    "coins_long": ["ADA", "ATOM", "BAT", ...]   # coins to long
                                                 # default is all margin enabled coins which have BTC as quote
-    "profit_pct": 0.0025,                       # minimum target profit per long/short exit
+    "coins_shrt": ["ADA", "ATOM", "BAT", ...]   # coins to short
+                                                # default is all margin enabled coins, except BNB, which have BTC as quote
                                                 #
-                                                # eg. if it over time spent total 0.01 BTC buying long a total of 200 coins,
+    "profit_pct": 0.0025,                       # minimum target profit per long/short exit
+                                                # eg. if over time spent total 0.01 BTC buying long a total of 200.0 coin,
                                                 # volume weighted average price is 0.01 / 200 == 0.00005
-                                                # and long sell price becomes 0.00005 * 1.0025 (0.25%) == 0.00005125
+                                                # and long sell price becomes 0.00005 * (1 + 0.0025) == 0.00005125
+                                                # inversely, if over time short sold a total of 200.0 coin for 0.01 BTC,
+                                                # volume weighted average price is still 0.00005
+                                                # and short buy price becomes 0.00005 * (1 - 0.0025) == 0.000049875
                                                 #
     "account_equity_pct_per_trade": 0.0006,     # percentage of total account equity to spend per symbol per trade
     "account_equity_pct_per_hour": 0.0045,      # percentage of total account equity to spend per symbol per hour
     "hours_rolling_small_trade_window": 3.0,    # eg. if (past 3 hours long buy volume) > threshold: don't place long bid
-    "bnb_buffer": 50.3,                         # BNB buffer for paying fees, interest and vip status
+    "bnb_buffer": 50.3,                         # BNB buffer for paying fees and interest, and for vip status
     "max_memory_span_days": 120,                # how many days past the bot will take trades into account
-    "ema_spans_minutes": [58, 70, ... 300, 360] # exponential moving averages used to set max/min bid/ask price
+    "ema_spans_minutes": [58, 70, ... 300, 360] # exponential moving averages used to set max bid and min ask prices
                                                 # it calculates any number of emas,
                                                 # and sets highest allowed bid = min(emas) and lowest allowed ask = max(emas)
 
