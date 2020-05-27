@@ -23,7 +23,8 @@ add api key and secret as json file in dir
 api_key_secret/binance/your_user_name.json
 
 formatted like this:
-["KEY", "SECRET"]
+
+`["KEY", "SECRET"]`
 
 
 if using non-default settings, make a copy of
