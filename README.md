@@ -8,7 +8,7 @@ requires python >= 3.8
 dependencies, install with pip:
 
 
-`python3.8 -m pip install ccxt pandas python-binance`
+`python3.8 -m pip install ccxt python-binance`
 
 
 binance account needs margin enabled,
