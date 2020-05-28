@@ -4,7 +4,6 @@ from commons import calc_other_orders, filter_orders
 from threading import Lock
 from time import time, sleep
 from typing import Callable
-import pandas as pd
 import os
 import json
 
