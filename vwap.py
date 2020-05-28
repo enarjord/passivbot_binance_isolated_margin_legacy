@@ -31,7 +31,7 @@ class Vwap:
         self.symbols_set = set(self.symbols)
         self.coins = hyperparams['coins']
         self.quot = hyperparams['quot']
-        self.all_coins_set = set(self.coins + [self.quot])
+        self.all_coins_set = set(list(self.coins) + [self.quot])
         self.symbol_split = {symbol: symbol.split('/') for symbol in self.symbols}
         self.do_shrt_sel = {symbol for symbol in self.symbols
                             if self.symbol_split[symbol][0] in hyperparams['coins_shrt']}
