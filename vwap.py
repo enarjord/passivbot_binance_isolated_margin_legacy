@@ -599,7 +599,10 @@ class Vwap:
                                  (self.balance[quot]['account_equity'] *
                                   self.hyperparams['account_equity_pct_per_period'] -
                                   long_cost_vol)])
-            long_buy_cost = long_buy_cost if long_buy_cost > self.min_trade_costs[s] else 0.0
+            if long_buy_cost <= 0.0:
+                long_buy_cost = 0.0
+            elif long_buy_cost < self.min_trade_costs[s]:
+                long_buy_cost = self.min_trade_costs[s]
             long_buy_price = min([
                 round_dn(self.cm.min_ema[s], self.price_precisions[s]),
                 other_ask_decr,
