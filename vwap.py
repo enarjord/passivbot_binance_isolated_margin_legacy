@@ -184,6 +184,9 @@ class Vwap:
                                 threaded(getattr(self, key))()
                         sleep(0.01)
                 sleep(1)
+                if now - self.last_stream_tick_ts > 30:
+                    print_(['warning, more than 30 seconds since last websocket tick',
+                            'streamer probably not running'])
             except(Exception) as e:
                 print('ERROR with updater\n\n', e)
                 raise Exception(e)
