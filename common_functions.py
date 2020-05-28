@@ -1,16 +1,11 @@
 from math import ceil, floor
 import pandas as pd
 import datetime
-import ciso8601
 from typing import Callable
 
 
 def ts_to_date(timestamp: float) -> str:
     return str(datetime.datetime.fromtimestamp(timestamp)).replace(' ', 'T')
-
-
-def date_to_ts(d):
-    return ciso8601.parse_datetime(d).timestamp()
 
 
 def flatten(lst: list) -> list:
