@@ -654,8 +654,7 @@ class Vwap:
         ideal_quot_onhand = quot_locked_in_shrt_buys + quot_locked_in_long_buys
         self.ideal_borrow[quot] = max(0.0, min(ideal_quot_onhand - self.balance[quot]['onhand'],
                                                self.balance[quot]['borrowable']))
-        ideal_repay_quot = max(0.0, min([(self.balance[quot]['borrowed'] +
-                                          self.balance[quot]['interest']),
+        ideal_repay_quot = max(0.0, min([self.balance[quot]['debt'],
                                          self.balance[quot]['free'],
                                          self.balance[quot]['onhand'] - ideal_quot_onhand]))
         self.ideal_repay[quot] = ideal_repay_quot \
@@ -665,14 +664,15 @@ class Vwap:
 
         ideal_coin_debt = self.my_trades_analyses[s]['true_shrt_amount'] + \
             self.ideal_shrt_sel[s]['amount']
+        ideal_coin_onhand = \
+            self.my_trades_analyses[s]['true_long_amount'] + self.ideal_shrt_sel[s]['amount']
 
         self.ideal_borrow[coin] = max(0.0, min(self.balance[coin]['borrowable'],
                                                ideal_coin_debt - self.balance[coin]['onhand']))
         ideal_repay_coin = min(self.balance[coin]['debt'],
                                (self.balance[coin]['onhand'] -
                                 ideal_coin_debt -
-                                self.my_trades_analyses[s]['true_long_amount'] -
-                                self.ideal_shrt_sel[s]['amount']))
+                                ideal_coin_onhand))
         self.ideal_repay[coin] = ideal_repay_coin \
             if ideal_repay_coin > approx_small_trade_amount * 2 else 0.0
 
