@@ -580,7 +580,8 @@ class Vwap:
                                self.hyperparams['profit_pct_minus']),
                               self.price_precisions[s_])
             c_, q_ = self.symbol_split[s_]
-            amount_ = round_dn(min(self.balance[c_]['borrowed'], max_quot_available / price_),
+            amount_ = round_dn(min(self.balance[c_]['borrowed'],
+                                   max_quot_available / (price_ if price_ > 0.0 else 9e9)),
                                self.amount_precisions[s_])
             cost_ = amount_ * price_
             all_shrt_buys[s_] = {'price': price_, 'amount': amount_, 'cost': cost_, 'symbol': s_}
