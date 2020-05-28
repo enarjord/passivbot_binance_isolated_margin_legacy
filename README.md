@@ -44,6 +44,11 @@ run in terminal:
 
 ------------------------------------------------------------------
 
+the size of its bids and asks scale with account equity
+
+it functions better with > 0.01 BTC to work with
+
+
 about the settings:
 
     "quot": "BTC",                              # the coin to accumulate
