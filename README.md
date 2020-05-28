@@ -40,7 +40,7 @@ otherwise, the bot will use default settings
 
 run in terminal:
 
-`passivbot.py your_user_name`
+`python3.8 passivbot.py your_user_name`
 
 ------------------------------------------------------------------
 
