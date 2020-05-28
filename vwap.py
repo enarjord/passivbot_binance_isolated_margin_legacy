@@ -567,19 +567,25 @@ class Vwap:
             self.cc.milliseconds() - self.hyperparams['millis_rolling_small_trade_window']
         )
 
-        all_shrt_buys = []
-        for s_ in self.symbols:
-            price_ = self.my_trades_analyses[s_]['true_shrt_vwap'] * \
-                self.hyperparams['profit_pct_minus']
-            c_, q_ = self.symbol_split[s_]
-            amount_ = self.balance[c_]['borrowed']
-            cost_ = amount_ * price_
-            all_shrt_buys.append({'price': price_, 'amount': amount_, 'cost': cost_, 'symbol': s_})
-
-        quot_locked_in_shrt_buys = sum([e['cost'] for e in all_shrt_buys])
         quot_locked_in_long_buys = \
             sum([self.ideal_long_buy[s_]['amount'] * self.ideal_long_buy[s_]['price']
                  for s_ in self.symbols])
+        max_quot_available = self.balance[quot]['onhand'] - quot_locked_in_long_buys
+
+        all_shrt_buys = {}
+        for s_ in self.symbols:
+            if s_ not in self.do_shrt_buy:
+                continue
+            price_ = round_dn((self.my_trades_analyses[s_]['true_shrt_vwap'] * \
+                               self.hyperparams['profit_pct_minus']),
+                              self.price_precisions[s_])
+            c_, q_ = self.symbol_split[s_]
+            amount_ = round_dn(min(self.balance[c_]['borrowed'], max_quot_available / price_),
+                               self.amount_precisions[s_])
+            cost_ = amount_ * price_
+            all_shrt_buys[s_] = {'price': price_, 'amount': amount_, 'cost': cost_, 'symbol': s_}
+
+        quot_locked_in_shrt_buys = sum([e['cost'] for e in all_shrt_buys.values()])
         self.quot_locked_in_shrt_buys = quot_locked_in_shrt_buys
 
         # small orders #
@@ -702,10 +708,11 @@ class Vwap:
 
         # shrt_buy #
         if s in self.do_shrt_buy:
-            shrt_buy_amount = (self.balance[coin]['borrowed'] +
-                               self.ideal_borrow[coin] -
-                               self.ideal_repay[coin] -
-                               self.ideal_shrt_sel[s]['amount'])
+            shrt_buy_amount = min(all_shrt_buys[s]['amount'],
+                                  (self.balance[coin]['borrowed'] +
+                                   self.ideal_borrow[coin] -
+                                   self.ideal_repay[coin] -
+                                   self.ideal_shrt_sel[s]['amount']))
             shrt_buy_amount = max(0.0, round_dn(shrt_buy_amount))
             shrt_buy_price = min([
                 round_dn(self.cm.min_ema[s], self.price_precisions[s]),
@@ -713,15 +720,17 @@ class Vwap:
                 (other_bid_incr
                  if shrt_buy_amount < highest_other_bid['amount']
                  else highest_other_bid['price']),
-                round_dn((self.my_trades_analyses[s]['true_shrt_vwap'] *
-                          self.hyperparams['profit_pct_minus']),
-                         self.price_precisions[s]),
+                all_shrt_buys[s]['price'],
             ])
             if shrt_buy_amount > min_big_trade_amount:
-                if self.balance[quot]['onhand'] + self.ideal_borrow[quot] < ideal_quot_onhand:
+                quot_available = (self.balance[quot]['onhand'] +
+                                  self.ideal_borrow[quot] -
+                                  self.ideal_repay[quot]) 
+                if quot_available < ideal_quot_onhand:
                     # means we are max leveraged
                     shrt_buys_sorted_by_price_diff = sorted(
-                        [e for e in all_shrt_buys if e['cost'] > small_trade_cost_default * 6],
+                        [e for e in all_shrt_buys.values()
+                         if e['cost'] > small_trade_cost_default * 6],
                         key=lambda x: self.cm.last_price[x['symbol']] / x['price']
                     )
                     tmp_sum = quot_locked_in_long_buys
