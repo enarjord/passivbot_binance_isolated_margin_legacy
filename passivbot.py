@@ -14,6 +14,7 @@ def load_settings(user: str):
     try:
         settings = json.load(open(f'settings/binance/{user}.json'))
     except(FileNotFoundError):
+        print(f'{user} not found, using default settings')
         settings = json.load(open(f'settings/binance/default.json'))
     settings['user'] = user
     return settings
