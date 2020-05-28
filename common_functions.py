@@ -1,5 +1,4 @@
 from math import ceil, floor
-import pandas as pd
 import datetime
 from typing import Callable
 
@@ -63,14 +62,6 @@ def ts_to_day(timestamp: float) -> str:
 
 def ts_to_date(timestamp: float) -> str:
     return str(datetime.datetime.fromtimestamp(timestamp)).replace(' ', 'T')
-
-
-def sort_and_drop_duplicates_by_index(df1: pd.DataFrame, df2: pd.DataFrame = None) -> pd.DataFrame:
-    if df1 is None and df2 is None:
-        return None
-    df = pd.concat([df1, df2])
-    df = df.sort_index()
-    return df.loc[~df.index.duplicated()]
 
 
 def remove_elem(lst: [], elem):
