@@ -628,7 +628,10 @@ class Vwap:
                  self.hyperparams['account_equity_pct_per_period'] -
                  shrt_cost_vol)
             ])
-            shrt_sel_cost = shrt_sel_cost if shrt_sel_cost > self.min_trade_costs[s] else 0.0
+            if shrt_sel_cost <= 0.0:
+                shrt_sel_cost = 0.0
+            elif shrt_sel_cost < self.min_trade_costs[s]:
+                shrt_sel_cost = self.min_trade_costs[s]
             shrt_sel_price = max([
                 round_up(self.cm.max_ema[s], self.price_precisions[s]),
                 other_bid_incr,
