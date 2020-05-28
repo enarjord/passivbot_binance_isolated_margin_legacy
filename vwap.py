@@ -668,9 +668,11 @@ class Vwap:
 
         self.ideal_borrow[coin] = max(0.0, min(self.balance[coin]['borrowable'],
                                                ideal_coin_debt - self.balance[coin]['onhand']))
-        ideal_repay_coin = min([self.balance[coin]['free'],
-                                self.balance[coin]['debt'],
-                                self.balance[coin]['onhand'] - ideal_coin_debt])
+        ideal_repay_coin = min(self.balance[coin]['debt'],
+                               (self.balance[coin]['onhand'] -
+                                ideal_coin_debt -
+                                self.my_trades_analyses[s]['true_long_amount'] -
+                                self.ideal_shrt_sel[s]['amount']))
         self.ideal_repay[coin] = ideal_repay_coin \
             if ideal_repay_coin > approx_small_trade_amount * 2 else 0.0
 
@@ -1009,5 +1011,4 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
     start_ts = min(long_start_ts, shrt_start_ts) - 1000 * 60 * 60 * 24 * 7
     _, cropped_my_trades = partition_sorted(my_trades, lambda x: x['timestamp'] >= start_ts)
     return cropped_my_trades, analysis
-
 
