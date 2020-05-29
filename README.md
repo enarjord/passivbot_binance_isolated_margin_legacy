@@ -73,7 +73,7 @@ blue dots are small long buys, red dots are big long sells, red line is long sel
 
 
 
-red dots are small short sells, blue dots are big short buys, blue line is short sell prices
+red dots are small short sells, blue dots are big short buys, blue line is short buy prices
 
 ![short](/docs/ethbtc_shrt.png/)
 
