@@ -43,7 +43,45 @@ run in terminal:
 `python3.8 passivbot.py your_user_name`
 
 ------------------------------------------------------------------
+overview
 
+the bot's purpose is to accumulate btc
+
+it simultaneously longs and shorts any btc quoted market, with default profit margin of 0.025%
+
+it longs by making small bids and shorts by borrowing coin from binance and making small asks
+
+it exits longs by summing up all btc spent and all coin acquired on small long buys,
+and places a big long sell whose price is sum(btc_spent) / sum(coin_acuired) * (1 + 0.0025)
+
+if it runs out of btc, it will borrow btc, and repay btc as long positions are filled
+
+inversely,
+it exits shorts by summing up all btc acquired and all coin spent on small short sells,
+and places a big short buy whose price is sum(btc_acquired) / sum(coin_spent) * (1 - 0.0025)
+
+when the short exit position is filled, it repays the coin debt
+
+here follows example illustrations of behavior with ETH/BTC for two months
+
+
+blue dots are small long buys, red dots are big long sells, red line is long sell prices
+
+![long](/docs/ethbtclong.png)
+
+
+
+red dots are small short sells, blue dots are big short buys, blue line is short sell prices
+
+![short](/docs/ethbtcshrt.png/)
+
+
+
+
+
+
+
+------------------------------------------------------------------
 the size of its bids and asks scale with account equity
 
 it functions better with > 0.01 BTC to work with
@@ -83,11 +121,7 @@ about the settings:
 
 
 
-it will long all coins and short all coins except BNB due to high interest rate
-
-the bot's goal is to accumulate BTC, both shorting and longing all coins simultaneously
-
-it is designed to benefit regardless of price moving up or down
+by default it will long all coins and short all coins except BNB due to high interest rate
 
 it will automatically place and delete orders, borrow and repay
 
@@ -103,11 +137,6 @@ one long exit: big ask
 one short entry: small ask
 
 one short exit: big bid
-
-
-price of long exit is sum(all long entries cost) / sum(all long entries amount) * 1.0025 (default settings)
-
-price of short exit is inversely sum(all short entries cost) / sum(all short entries amount) * 0.9975 (default settings)
 
 it will automatically analyze past trades and make appropriate long and short exits
 
