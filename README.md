@@ -49,7 +49,7 @@ overview
 
 the bot's purpose is to accumulate btc
 
-it simultaneously longs and shorts any btc quoted market, with default profit margin of 0.025%
+it simultaneously longs and shorts any btc quoted market
 
 it longs by making small bids and shorts by borrowing coin from binance and making small asks
 
