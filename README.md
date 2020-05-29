@@ -67,13 +67,13 @@ here follows example illustrations of behavior with ETH/BTC for two months
 
 blue dots are small long buys, red dots are big long sells, red line is long sell prices
 
-![long](/docs/ethbtclong.png)
+![long](/docs/ethbtc_long.png)
 
 
 
 red dots are small short sells, blue dots are big short buys, blue line is short sell prices
 
-![short](/docs/ethbtcshrt.png/)
+![short](/docs/ethbtc_shrt.png/)
 
 
 
