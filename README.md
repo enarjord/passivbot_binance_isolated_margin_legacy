@@ -64,7 +64,7 @@ and places a big short buy whose price is sum(btc_acquired) / sum(coin_spent) * 
 
 when the short exit position is filled, it repays the coin debt
 
-here follows example illustrations of behavior with ETH/BTC for two months
+here follow example illustrations of behavior with ETH/BTC for two months
 
 
 blue dots are small long buys, red dots are big long sells, red line is long sell prices
