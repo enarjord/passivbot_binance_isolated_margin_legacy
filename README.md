@@ -14,6 +14,8 @@ dependencies, install with pip:
 binance account needs margin enabled,
 works with both 3x and 5x margin
 
+use at own risk
+
 ------------------------------------------------------------------
 
 usage:
