@@ -91,13 +91,13 @@ it functions better with > 0.01 BTC to work with
 
 about the settings:
 
-    "quot": "BTC",                              # the coin to accumulate
+    "quot": "BTC",                              # the coin to accumulate, only tested with BTC
     "coins_long": ["ADA", "ATOM", "BAT", ...]   # coins to long
                                                 # default is all margin enabled coins which have BTC as quote
     "coins_shrt": ["ADA", "ATOM", "BAT", ...]   # coins to short
                                                 # default is all margin enabled coins, except BNB, which have BTC as quote
                                                 #
-    "profit_pct": 0.0025,                       # minimum target profit per long/short exit
+    "profit_pct": 0.0025,                       # minimum markup per long/short exit
                                                 # eg. if over time spent total 0.01 BTC buying long a total of 200.0 coin,
                                                 # volume weighted average price is 0.01 / 200 == 0.00005
                                                 # and long sell price becomes 0.00005 * (1 + 0.0025) == 0.00005125
