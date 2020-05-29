@@ -54,13 +54,13 @@ it simultaneously longs and shorts any btc quoted market
 it longs by making small bids and shorts by borrowing coin from binance and making small asks
 
 it exits longs by summing up all btc spent and all coin acquired on small long buys,
-and places a big long sell whose price is sum(btc_spent) / sum(coin_acuired) * (1 + 0.0025)
+and places a big long ask whose price is sum(btc_spent) / sum(coin_acquired) * (1 + 0.0025)
 
-if it runs out of btc, it will borrow btc, and repay btc as long positions are filled
+if it runs out of btc, it will borrow btc, and repay btc debt after long positions are filled
 
 inversely,
 it exits shorts by summing up all btc acquired and all coin spent on small short sells,
-and places a big short buy whose price is sum(btc_acquired) / sum(coin_spent) * (1 - 0.0025)
+and places a big short bid whose price is sum(btc_acquired) / sum(coin_spent) * (1 - 0.0025)
 
 when the short exit position is filled, it repays the coin debt
 
