@@ -581,7 +581,7 @@ class Vwap:
                                self.hyperparams['profit_pct_minus']),
                               self.price_precisions[s_])
             c_, q_ = self.symbol_split[s_]
-            amount_ = round_dn(min(self.my_trades_analyses[s_]['true_shrt_amount'],
+            amount_ = round_up(min(self.my_trades_analyses[s_]['true_shrt_amount'],
                                    max_quot_available / (price_ if price_ > 0.0 else 9e9)),
                                self.amount_precisions[s_])
             cost_ = amount_ * price_
@@ -718,7 +718,7 @@ class Vwap:
 
         # shrt_buy #
         if s in self.do_shrt_buy:
-            shrt_buy_amount = max(0.0, round_dn(all_shrt_buys[s]['amount']))
+            shrt_buy_amount = all_shrt_buys[s]['amount']
             shrt_buy_price = min([
                 round_dn(self.cm.min_ema[s], self.price_precisions[s]),
                 other_ask_decr,
