@@ -374,7 +374,8 @@ class Vwap:
         written_history = self.write_cache(cache_filepath, fetched_history)
         my_trades = remove_duplicates(cached_history + written_history,
                                       key='id', sort=True)
-        age_limit_millis = self.cc.milliseconds() - self.hyperparams['max_memory_span_millis']
+        age_limit_millis = max(self.cc.milliseconds() - self.hyperparams['max_memory_span_millis'],
+                               self.hyperparams['snapshot_timestamp_millis'])
 
         my_trades = [e for e in my_trades if e['timestamp'] > age_limit_millis]
         self.my_trades[symbol], self.my_trades_analyses[symbol] = \
@@ -417,7 +418,9 @@ class Vwap:
                 self.my_trades[symbol], self.my_trades_analyses[symbol] = \
                     analyze_my_trades(self.my_trades[symbol] + written_my_trades)
 
-            age_limit_millis = self.cc.milliseconds() - self.hyperparams['max_memory_span_millis']
+            age_limit_millis = \
+                max(self.cc.milliseconds() - self.hyperparams['max_memory_span_millis'],
+                    self.hyperparams['snapshot_timestamp_millis'])
             my_trades = [e for e in self.my_trades[symbol] if e['timestamp'] > age_limit_millis]
             self.my_trades[symbol] = my_trades
             self.time_keepers['update_my_trades'][symbol] = time()
@@ -1013,4 +1016,3 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
     start_ts = min(long_start_ts, shrt_start_ts) - 1000 * 60 * 60 * 24 * 7
     _, cropped_my_trades = partition_sorted(my_trades, lambda x: x['timestamp'] >= start_ts)
     return cropped_my_trades, analysis
-
