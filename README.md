@@ -64,8 +64,19 @@ and places a big short bid whose price is sum(btc_acquired) / sum(coin_spent) * 
 
 when the short exit position is filled, it repays the coin debt
 
-here follow example illustrations of behavior with ETH/BTC for two months
+by default it will make exits at at least 0.25% markup to cover fees to exchange and profit
 
+net profit per exit will depend on whether fees are paid with BNB and on vip level:
+
+- with 0.1% fee per trade, exchange takes 1 / ((1 - 0.001)**2) - 1 ~= 0.2%, leaving at least ~0.05% profit per exit
+- with 0.075% fee per trade, exchange takes 1 / ((1 - 0.00075)**2) - 1 ~= 0.15%, leaving at least ~0.1% profit per exit
+- with 0.0675% fee per trade, exchange takes 1 / ((1 - 0.000675)**2) - 1 ~= 0.135%, leaving at least ~0.115% profit per exit
+- etc.
+
+
+interest paid on loans from exchange will also reduce profits
+
+here follow example illustrations of behavior with ETH/BTC for two months
 
 blue dots are small long buys, red dots are big long sells, red line is long sell prices
 
