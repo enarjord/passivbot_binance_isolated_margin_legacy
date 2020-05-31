@@ -11,11 +11,15 @@ import json
 
 
 def load_settings(user: str):
+    default_settings = json.load(open(f'settings/binance/default.json'))
     try:
         settings = json.load(open(f'settings/binance/{user}.json'))
+        for key in default_settings:
+            if key not in settings:
+                settings[key] = default_settings[key]
     except(FileNotFoundError):
         print(f'{user} not found, using default settings')
-        settings = json.load(open(f'settings/binance/default.json'))
+        settings = default_settings
     settings['user'] = user
     return settings
 
