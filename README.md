@@ -109,7 +109,8 @@ about the settings:
     "account_equity_pct_per_hour": 0.0045,      # percentage of total account equity to spend per symbol per hour
     "hours_rolling_small_trade_window": 3.0,    # eg. if (past 3 hours long buy volume) > threshold: don't place long bid
     "bnb_buffer": 50.3,                         # BNB buffer for paying fees and interest, and for vip status
-    "max_memory_span_days": 60,                 # how many days past the bot will take trades into account
+    "max_memory_span_days": 60,                 # how many days past the bot will take trade history into account
+    "snapshot_timestamp_millis": 0,             # timestamp in millis from which bot will take trade history into account
     "ema_spans_minutes": [58, 70, ... 300, 360] # exponential moving averages used to set max bid and min ask prices
                                                 # it calculates any number of emas,
                                                 # and sets highest allowed bid = min(emas) and lowest allowed ask = max(emas)
