@@ -818,7 +818,6 @@ class Vwap:
             print(f'ERROR with {fn.__name__} {args} {kwargs}', repr(e), comment)
             return None
 
-
     def update_borrow_history(self, coin: str):
         self.try_wrapper(self.update_loan_history, (coin, 'borrow'))
 
@@ -985,7 +984,7 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
                 # shrt buy
                 shrt_amount -= mt['amount']
                 shrt_cost -= mt['cost']
-                if shrt_amount < 0.0 or shrt_cost < 0.0:
+                if shrt_amount <= 0.0 or shrt_cost <= 0.0:
                     shrt_start_ts = mt['timestamp']
                     shrt_amount = 0.0
                     shrt_cost = 0.0
@@ -998,7 +997,7 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
                 # long sel
                 long_amount -= mt['amount']
                 long_cost -= mt['cost']
-                if long_amount < 0.0 or long_cost < 0.0:
+                if long_amount <= 0.0 or long_cost <= 0.0:
                     long_start_ts = mt['timestamp']
                     long_amount = 0.0
                     long_cost = 0.0
