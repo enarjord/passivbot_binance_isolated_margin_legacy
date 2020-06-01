@@ -574,7 +574,7 @@ class Vwap:
         quot_locked_in_long_buys = \
             sum([self.ideal_long_buy[s_]['amount'] * self.ideal_long_buy[s_]['price']
                  for s_ in self.symbols])
-        max_quot_available = self.balance[quot]['onhand'] - quot_locked_in_long_buys
+        max_quot_available = (self.balance[quot]['onhand'] - quot_locked_in_long_buys) * 0.99
 
         all_shrt_buys = {}
         for s_ in self.symbols:
