@@ -14,6 +14,8 @@ dependencies, install with pip:
 binance account needs margin enabled,
 works with both 3x and 5x margin
 
+it functions better with > 0.01 BTC to work with
+
 use at own risk
 
 ------------------------------------------------------------------
@@ -96,8 +98,6 @@ red dots are small short sells, blue dots are big short buys, blue line is short
 
 ------------------------------------------------------------------
 the size of its bids and asks scale with account equity
-
-it functions better with > 0.01 BTC to work with
 
 
 about the settings:
