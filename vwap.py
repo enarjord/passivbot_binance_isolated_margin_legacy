@@ -610,6 +610,11 @@ class Vwap:
                  if long_buy_cost / other_bid_incr < highest_other_bid['amount']
                  else highest_other_bid['price'])
             ])
+            self.ideal_long_buy[s] = {
+                'side': 'buy',
+                'amount': round_up(long_buy_cost / long_buy_price, self.amount_precisions[s]),
+                'price': long_buy_price
+            }
             if self.balance[quot]['onhand'] < quot_locked_in_long_buys:
                 # means not enough quot for all long buys
                 # select those whose price is closest to last price
@@ -629,12 +634,7 @@ class Vwap:
                         break
                     eligible_long_buys.append(lb)
                 if s not in set(map(lambda x: x['symbol'], eligible_long_buys)):
-                    long_buy_price = 0.0
-            self.ideal_long_buy[s] = {
-                'side': 'buy',
-                'amount': round_up(long_buy_cost / long_buy_price, self.amount_precisions[s]),
-                'price': long_buy_price
-            }
+                    self.ideal_long_buy[s] = {'side': 'buy', 'amount': 0.0, 'price': long_buy_price}
         else:
             self.ideal_long_buy[s] = {'side': 'buy', 'amount': 0.0, 'price': 0.0}
         ############
