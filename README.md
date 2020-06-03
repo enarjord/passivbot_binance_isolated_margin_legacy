@@ -41,6 +41,9 @@ and make changes
 
 otherwise, the bot will use default settings
 
+it will use the account's trade history to make trading decisions
+
+consider changing "snapshot_timestamp_millis" from 0 to current unix time in milliseconds, see more below
 
 run in terminal:
 
