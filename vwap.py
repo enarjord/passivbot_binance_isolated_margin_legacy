@@ -802,8 +802,8 @@ class Vwap:
         fns = []
         args_list = []
         if bid_deletions:
-            fns += [self.cancel_margin_order] * len(bid_deletions)
-            args_list += [(deletion['id'], s) for deletion in bid_deletions]
+            fns += [self.cancel_margin_order] * min(len(bid_deletions), 3)
+            args_list += [(deletion['id'], s) for deletion in bid_deletions[:3]]
         if bid_creations:
             fns += [self.create_margin_bid] * len(bid_creations)
             args_list += [(s, creation['amount'], creation['price']) for creation in bid_creations]
@@ -817,8 +817,8 @@ class Vwap:
         fns = []
         args_list = []
         if ask_deletions:
-            fns += [self.cancel_margin_order] * len(ask_deletions)
-            args_list += [(deletion['id'], s) for deletion in ask_deletions]
+            fns += [self.cancel_margin_order] * min(len(ask_deletions), 3)
+            args_list += [(deletion['id'], s) for deletion in ask_deletions[:3]]
         if ask_creations:
             fns += [self.create_margin_ask] * len(ask_creations)
             args_list += [(s, creation['amount'], creation['price']) for creation in ask_creations]
