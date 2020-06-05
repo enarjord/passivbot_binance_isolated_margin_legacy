@@ -90,6 +90,8 @@ net profit per exit will depend on whether fees are paid with BNB and on vip lev
 
 interest paid on loans from exchange will also reduce profits
 
+----------------------------------------------------------------------------------------
+
 here follow example illustrations of behavior with ETH/BTC for two months
 
 blue dots are small long buys, red dots are big long sells, red line is long sell prices
