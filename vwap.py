@@ -691,14 +691,22 @@ class Vwap:
         ideal_coin_onhand = \
             self.my_trades_analyses[s]['true_long_amount'] + self.ideal_shrt_sel[s]['amount']
 
-        self.ideal_borrow[coin] = max(0.0, min(self.balance[coin]['borrowable'],
-                                               ideal_coin_debt - self.balance[coin]['onhand']))
-        ideal_repay_coin = min(self.balance[coin]['debt'],
-                               (self.balance[coin]['onhand'] -
-                                ideal_coin_debt -
-                                ideal_coin_onhand))
-        self.ideal_repay[coin] = ideal_repay_coin \
-            if ideal_repay_coin > approx_small_trade_amount * 2 else 0.0
+        if self.balance[coin]['debt'] > ideal_coin_debt and \
+                self.balance[coin]['onhand'] > ideal_coin_onhand:
+            # repay
+            self.ideal_borrow[coin] = 0.0
+            ideal_repay_coin = min([self.balance[coin]['debt'],
+                                    self.balance[coin]['onhand'] - ideal_coin_onhand,
+                                    self.balance[coin]['debt'] - ideal_coin_debt])
+            self.ideal_repay[coin] = ideal_repay_coin \
+                if ideal_repay_coin > approx_small_trade_amount * 2 else 0.0
+        else:
+            # borrow
+            self.ideal_borrow[coin] = min(self.balance[coin]['borrowable'],
+                                          max(ideal_coin_debt - self.balance[coin]['debt'],
+                                              ideal_coin_onhand - self.balance[coin]['onhand']))
+            self.ideal_repay[coin] = 0.0
+
 
         ####################
 
@@ -735,7 +743,14 @@ class Vwap:
 
         # shrt_buy #
         if s in self.do_shrt_buy:
-            shrt_buy_amount = all_shrt_buys[s]['amount']
+            shrt_buy_amount = min(max_quot_available / (all_shrt_buys[s]['price']
+                                                        if all_shrt_buys[s]['price'] else 9e9),
+                                  max(self.my_trades_analyses[s]['true_shrt_amount'],
+                                      (self.balance[coin]['debt'] +
+                                       self.ideal_borrow[coin] -
+                                       self.ideal_repay[coin] -
+                                       self.ideal_shrt_sel[s]['amount'])))
+            shrt_buy_amount = round_up(shrt_buy_amount, self.amount_precisions[s])
             shrt_buy_price = min([
                 round_dn(self.cm.min_ema[s], self.price_precisions[s]),
                 other_ask_decr,
