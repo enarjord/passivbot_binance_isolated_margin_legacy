@@ -593,6 +593,10 @@ class Vwap:
         quot_locked_in_shrt_buys = sum([e['cost'] for e in all_shrt_buys.values()])
         self.quot_locked_in_shrt_buys = quot_locked_in_shrt_buys
 
+        long_sel_price = round_up((self.my_trades_analyses[s]['true_long_vwap'] *
+                                   self.hyperparams['profit_pct_plus']),
+                                  self.price_precisions[s])
+
         # small orders #
 
         # long_buy #
@@ -691,22 +695,34 @@ class Vwap:
         ideal_coin_onhand = \
             self.my_trades_analyses[s]['true_long_amount'] + self.ideal_shrt_sel[s]['amount']
 
-        if self.balance[coin]['debt'] > ideal_coin_debt and \
-                self.balance[coin]['onhand'] > ideal_coin_onhand:
+
+        # considering shorts
+        if self.balance[coin]['debt'] > ideal_coin_debt:
             # repay
             self.ideal_borrow[coin] = 0.0
-            ideal_repay_coin = min([self.balance[coin]['debt'],
-                                    self.balance[coin]['onhand'] - ideal_coin_onhand,
-                                    self.balance[coin]['debt'] - ideal_coin_debt])
+            ideal_repay_coin = min(self.balance[coin]['onhand'],
+                                   self.balance[coin]['debt'] - ideal_coin_debt)
             self.ideal_repay[coin] = ideal_repay_coin \
                 if ideal_repay_coin > approx_small_trade_amount * 2 else 0.0
         else:
             # borrow
             self.ideal_borrow[coin] = min(self.balance[coin]['borrowable'],
-                                          max(ideal_coin_debt - self.balance[coin]['debt'],
-                                              ideal_coin_onhand - self.balance[coin]['onhand']))
+                                          ideal_coin_debt - self.balance[coin]['debt'])
             self.ideal_repay[coin] = 0.0
 
+        # considering longs
+        coin_missing_from_long_sel = ideal_coin_onhand - self.balance[coin]['onhand']
+
+        if coin_missing_from_long_sel > 0.0:
+            # should we borrow to make up the diff?
+            if self.ideal_borrow[coin] == 0.0:
+                # we are not already borrowing for shrts
+                if long_sel_price / self.cm.last_price[s] < 1.001:
+                    # we are less than 0.1% away from from filling the long sel
+                    # borrow to fill long sell
+                    self.ideal_borrow[coin] = min(self.balance[coin]['borrowable'],
+                                                  coin_missing_from_long_sel)
+                    self.ideal_repay[coin] = 0.0
 
         ####################
 
@@ -728,9 +744,7 @@ class Vwap:
                     (other_ask_decr
                      if long_sel_amount < lowest_other_ask['amount']
                      else lowest_other_ask['price']),
-                    round_up((self.my_trades_analyses[s]['true_long_vwap'] *
-                              self.hyperparams['profit_pct_plus']),
-                             self.price_precisions[s])
+                    long_sel_price
                 ])
             else:
                 long_sel_price = 0.0
