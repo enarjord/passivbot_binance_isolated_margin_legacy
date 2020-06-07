@@ -1,7 +1,6 @@
 from math import ceil, floor
 import datetime
 from typing import Callable
-import numpy as np
 
 
 def ts_to_date(timestamp: float) -> str:
@@ -131,7 +130,3 @@ def partition_sorted(lst: list, condition: Callable):
         if condition(lst[i]):
             return lst[:i], lst[i:]
     return lst, []
-
-
-def format_float(num, rounding: int = -1):
-    return np.format_float_positional(num if rounding == -1 else round(num, rounding), trim='-')
