@@ -132,3 +132,5 @@ def partition_sorted(lst: list, condition: Callable):
     return lst, []
 
 
+def format_float(num, rounding: int = -1):
+    return np.format_float_positional(num if rounding == -1 else round(num, rounding), trim='-')
