@@ -711,7 +711,8 @@ class Vwap:
             self.ideal_repay[coin] = 0.0
 
         # considering longs
-        coin_missing_from_long_sel = ideal_coin_onhand - self.balance[coin]['onhand']
+        coin_missing_from_long_sel = \
+            ideal_coin_onhand - self.balance[coin]['onhand'] + self.ideal_repay[coin]
 
         if coin_missing_from_long_sel > 0.0:
             # should we borrow to make up the diff?
