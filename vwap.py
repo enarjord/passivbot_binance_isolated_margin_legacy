@@ -513,7 +513,7 @@ class Vwap:
                 'status': canceled['status'].lower()}
 
     def borrow(self, coin: str, amount: float):
-        amount = round(amount, 8)
+        amount = round_up(amount, 8)
         if amount <= 0.0:
             return
         print_([f'borrowing {amount} {coin}'])
@@ -672,7 +672,7 @@ class Vwap:
                     'price': shrt_sel_price
                 }
             else:
-                self.ideal_shrt_sel[s] = {'side': 'sell', 'amount': 0.0, 'price': 0.0}
+                self.ideal_shrt_sel[s] = {'side': 'sell', 'amount': 0.0, 'price': shrt_sel_price}
         else:
             self.ideal_shrt_sel[s] = {'side': 'sell', 'amount': 0.0, 'price': 0.0}
         ###########
@@ -690,41 +690,45 @@ class Vwap:
 
         #------------------#
 
-        ideal_coin_debt = (self.my_trades_analyses[s]['true_shrt_amount'] +
-                           self.ideal_shrt_sel[s]['amount']) if coin in self.do_borrow else 0.0
-        ideal_coin_onhand = \
-            self.my_trades_analyses[s]['true_long_amount'] + self.ideal_shrt_sel[s]['amount']
+        shrt_sel_amount_ = round_up(small_trade_cost / self.ideal_shrt_sel[s]['price'],
+                                    self.amount_precisions[s]) \
+            if self.ideal_shrt_sel[s]['price'] > 0.0 else 0.0
+        ideal_coin_debt = (self.my_trades_analyses[s]['true_shrt_amount'] + shrt_sel_amount_) \
+            if coin in self.do_borrow else 0.0
+        ideal_coin_onhand = self.my_trades_analyses[s]['true_long_amount'] + shrt_sel_amount_
+
+        ideal_borrow_coin, ideal_repay_coin = 0.0, 0.0
 
 
-        # considering shorts
-        if self.balance[coin]['debt'] > ideal_coin_debt:
-            # repay
-            self.ideal_borrow[coin] = 0.0
-            ideal_repay_coin = min(self.balance[coin]['onhand'],
+        if self.balance[coin]['onhand'] < shrt_sel_amount_:
+            # we have not enough coin onhand for short sell, borrow the diff
+            ideal_borrow_coin = shrt_sel_amount_ - self.balance[coin]['onhand']
+        elif self.balance[coin]['debt'] > ideal_coin_debt:
+            # we have too much debt, repay the diff, minus for short sell
+            ideal_repay_coin = min(self.balance[coin]['onhand'] - shrt_sel_amount_,
                                    self.balance[coin]['debt'] - ideal_coin_debt)
-            self.ideal_repay[coin] = ideal_repay_coin \
-                if ideal_repay_coin > approx_small_trade_amount * 2 else 0.0
+            if ideal_repay_coin < approx_small_trade_amount * 2:
+                ideal_repay_coin = 0.0
         else:
-            # borrow
-            self.ideal_borrow[coin] = min(self.balance[coin]['borrowable'],
-                                          ideal_coin_debt - self.balance[coin]['debt'])
-            self.ideal_repay[coin] = 0.0
+            # we do not have enough debt to match true_shrt_amount, borrow the diff
+            ideal_borrow_coin = ideal_coin_debt - self.balance[coin]['debt']
 
-        # considering longs
-        if coin in self.do_borrow:
+        if coin in self.do_borrow and ideal_borrow_coin <= 0.0:
             coin_missing_from_long_sel = \
-                ideal_coin_onhand - self.balance[coin]['onhand'] + self.ideal_repay[coin]
+                ideal_coin_onhand - self.balance[coin]['onhand'] + ideal_repay_coin
     
             if coin_missing_from_long_sel > 0.0:
+                # we have not enough coin onhand to fill the whole long sell
                 # should we borrow to make up the diff?
-                if self.ideal_borrow[coin] == 0.0:
-                    # we are not already borrowing for shrts
-                    if long_sel_price / self.cm.last_price[s] < 1.001:
-                        # we are less than 0.1% away from from filling the long sel
-                        # borrow to fill long sell
-                        self.ideal_borrow[coin] = min(self.balance[coin]['borrowable'],
-                                                      coin_missing_from_long_sel)
-                        self.ideal_repay[coin] = 0.0
+                if long_sel_price / self.cm.last_price[s] < 1.001:
+                    # we are less than 0.1% away from from filling the long sell
+                    # borrow to fill long sell
+                    ideal_borrow_coin = coin_missing_from_long_sel
+                    ideal_repay_coin = 0.0
+        self.ideal_borrow[coin] = max(0.0, min(self.balance[coin]['borrowable'], ideal_borrow_coin))
+        self.ideal_repay[coin] = max(0.0, min([self.balance[coin]['debt'],
+                                               self.balance[coin]['onhand'],
+                                               ideal_repay_coin]))
 
         ####################
 
