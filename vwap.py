@@ -711,19 +711,20 @@ class Vwap:
             self.ideal_repay[coin] = 0.0
 
         # considering longs
-        coin_missing_from_long_sel = \
-            ideal_coin_onhand - self.balance[coin]['onhand'] + self.ideal_repay[coin]
-
-        if coin_missing_from_long_sel > 0.0:
-            # should we borrow to make up the diff?
-            if self.ideal_borrow[coin] == 0.0:
-                # we are not already borrowing for shrts
-                if long_sel_price / self.cm.last_price[s] < 1.001:
-                    # we are less than 0.1% away from from filling the long sel
-                    # borrow to fill long sell
-                    self.ideal_borrow[coin] = min(self.balance[coin]['borrowable'],
-                                                  coin_missing_from_long_sel)
-                    self.ideal_repay[coin] = 0.0
+        if coin in self.do_borrow:
+            coin_missing_from_long_sel = \
+                ideal_coin_onhand - self.balance[coin]['onhand'] + self.ideal_repay[coin]
+    
+            if coin_missing_from_long_sel > 0.0:
+                # should we borrow to make up the diff?
+                if self.ideal_borrow[coin] == 0.0:
+                    # we are not already borrowing for shrts
+                    if long_sel_price / self.cm.last_price[s] < 1.001:
+                        # we are less than 0.1% away from from filling the long sel
+                        # borrow to fill long sell
+                        self.ideal_borrow[coin] = min(self.balance[coin]['borrowable'],
+                                                      coin_missing_from_long_sel)
+                        self.ideal_repay[coin] = 0.0
 
         ####################
 
