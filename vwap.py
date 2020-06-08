@@ -690,8 +690,8 @@ class Vwap:
 
         #------------------#
 
-        ideal_coin_debt = self.my_trades_analyses[s]['true_shrt_amount'] + \
-            self.ideal_shrt_sel[s]['amount']
+        ideal_coin_debt = (self.my_trades_analyses[s]['true_shrt_amount'] +
+                           self.ideal_shrt_sel[s]['amount']) if coin in self.do_borrow else 0.0
         ideal_coin_onhand = \
             self.my_trades_analyses[s]['true_long_amount'] + self.ideal_shrt_sel[s]['amount']
 
