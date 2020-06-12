@@ -57,7 +57,7 @@
     "profit_pct": 0.0025,
     "account_equity_pct_per_trade": 0.0006,
     "account_equity_pct_per_hour": 0.0045,
-    "hours_rolling_small_trade_window": 3.0,
+    "hours_rolling_small_trade_window": 1.0,
     "bnb_buffer": 50.3,
     "max_memory_span_days": 60,
     "snapshot_timestamp_millis": 0,
