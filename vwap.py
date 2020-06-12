@@ -793,7 +793,7 @@ class Vwap:
         future_results = []
 
         now_millis = self.cc.milliseconds()
-        if self.prev_loan_ts['all'] - now_millis > 1000 * 2: # min 2 sec between borrow/repay
+        if now_millis - self.prev_loan_ts['all'] > 1000 * 2: # min 2 sec between borrow/repay
             for coin in self.all_coins_set:
                 if now_millis - self.prev_loan_ts[coin] < 1000 * 60 * 2:
                     continue # min 2 min between consecutive same coin borrow/repay
@@ -820,14 +820,12 @@ class Vwap:
         order_deletions, order_creations = \
             filter_orders(flatten(self.open_orders.values()),
                           self.eligible_entries + self.eligible_exits)
-        '''
         lod, loc = len(order_deletions), len(order_creations)
         if any([lod, loc]):
-            print(lod, loc)
+            print('deletion queue', lod, 'creation queue', loc)
         else:
             if self.counter % 21 == 0:
-                print(lod, loc)
-        '''
+                print('deletion queue', lod, 'creation queue', loc)
         for o in order_deletions[:4]:
             if self.cm.can_execute():
                 self.cm.add_ts_to_lists()
