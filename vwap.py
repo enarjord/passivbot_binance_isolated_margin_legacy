@@ -67,7 +67,7 @@ class Vwap:
         self.eligible_entries = []
         self.eligible_exits = []
         self.prev_execution_ts = 0
-        self.prev_loan_ts = {c_: 0 for c_ in self.all_coins_set}
+        self.prev_loan_ts = {c_: 0 for c_ in sorted(self.all_coins_set) + ['all']}
         self.prev_repay_ts = {c_: 0 for c_ in self.all_coins_set}
 
         self.time_keepers = {'update_balance': 0,
@@ -774,45 +774,48 @@ class Vwap:
 
     def execute_to_exchange(self):
         now = time()
-        if now - self.prev_execution_ts < 1.5:
+        if now - self.prev_execution_ts < 1.0: # min 1 second between executions to exchange
             return
         self.counter += 1
         self.try_wrapper(self.allocate_credit)
         self.prev_execution_ts = time()
         if any([self.time_keepers['update_my_trades'][s] < 11 for s in self.symbols]) or \
-                any([self.time_keepers['update_my_trades'][s] < 11 for s in self.symbols]) or \
+                any([self.time_keepers['update_open_orders'][s] < 11 for s in self.symbols]) or \
                 self.time_keepers['update_balance'] < 11:
-            return
-
+            return # don't execute if any unfinished updates of my_trades, open_orders or balance
 
         if self.future_handling_lock.locked():
             if time() - self.time_keepers['future_handling_lock'] > self.force_lock_release_timeout:
                 self.future_handling_lock.release()
             else:
-                return
+                return # don't execute if unfinished previous execution
 
         future_results = []
 
         now_millis = self.cc.milliseconds()
-        for coin in self.all_coins_set:
-            if now_millis - self.prev_loan_ts[coin] < 120 * 1000:
-                continue
-            amount = self.ideal_borrow[coin]
-            if amount > 0.0 and amount <= self.balance[coin]['borrowable']:
-                future_results.append((coin, self.borrow, threaded(self.borrow)(coin, amount)))
-                self.ideal_borrow[coin] = 0.0
-                self.prev_loan_ts[coin] = now_millis
-                break
-            amount = self.ideal_repay[coin]
-            if amount > 0.0 and amount <= self.balance[coin]['free'] and \
-                    now_millis - self.prev_repay_ts[coin] > 59 * 60 * 1000:
-                future_results.append((coin, self.repay, threaded(self.repay)(coin, amount)))
-                self.ideal_repay[coin] = 0.0
-                self.balance[coin]['debt'] -= amount
-                self.prev_loan_ts[coin] = now_millis
-                self.prev_repay_ts[coin] = now_millis
-
-                break
+        if self.prev_loan_ts['all'] - now_millis > 1000 * 2: # min 2 sec between borrow/repay
+            for coin in self.all_coins_set:
+                if now_millis - self.prev_loan_ts[coin] < 1000 * 60 * 2:
+                    continue # min 2 min between consecutive same coin borrow/repay
+                amount = self.ideal_borrow[coin]
+                if amount > 0.0 and amount <= self.balance[coin]['borrowable']:
+                    future_results.append((coin, self.borrow, threaded(self.borrow)(coin, amount)))
+                    self.ideal_borrow[coin] = 0.0
+                    self.prev_loan_ts[coin] = now_millis
+                    self.prev_loan_ts['all'] = now_millis
+                    break
+                amount = self.ideal_repay[coin]
+                if amount > 0.0 and amount <= self.balance[coin]['free'] and \
+                        now_millis - self.prev_repay_ts[coin] > 59 * 60 * 1000:
+                    # min 59 min between consecutive same coin repay
+                    future_results.append((coin, self.repay, threaded(self.repay)(coin, amount)))
+                    self.ideal_repay[coin] = 0.0
+                    self.balance[coin]['debt'] -= amount
+                    self.prev_loan_ts[coin] = now_millis
+                    self.prev_loan_ts['all'] = now_millis
+                    self.prev_repay_ts[coin] = now_millis
+    
+                    break
 
         order_deletions, order_creations = \
             filter_orders(flatten(self.open_orders.values()),
