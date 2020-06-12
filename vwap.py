@@ -567,8 +567,8 @@ class Vwap:
                  self.my_trades_analyses[s]['shrt_cost_vol'])) / shrt_sel_price)
             self.ideal_shrt_sel[s] = {
                 'side': 'sell',
-                'amount': (round_up(shrt_sel_amount, self.amount_precisions[s])
-                           if shrt_sel_amount * shrt_sel_price > self.min_trade_costs[s] else 0.0),
+                'amount': (ssar if (ssar := round_up(shrt_sel_amount, self.amount_precisions[s])) *
+                           shrt_sel_price >= self.min_trade_costs[s] else 0.0),
                 'price': shrt_sel_price
             }
         if s in self.do_long_buy:
@@ -585,8 +585,8 @@ class Vwap:
                  self.my_trades_analyses[s]['long_cost_vol'])) / long_buy_price)
             self.ideal_long_buy[s] = {
                 'side': 'buy',
-                'amount': (round_up(long_buy_amount, self.amount_precisions[s])
-                           if long_buy_amount * long_buy_price > self.min_trade_costs[s] else 0.0),
+                'amount': (lbar if (lbar := round_up(long_buy_amount, self.amount_precisions[s])) *
+                           long_buy_price >= self.min_trade_costs[s] else 0.0),
                 'price': long_buy_price
             }
         if s in self.do_shrt_buy:
@@ -820,12 +820,14 @@ class Vwap:
         order_deletions, order_creations = \
             filter_orders(flatten(self.open_orders.values()),
                           self.eligible_entries + self.eligible_exits)
+        '''
         lod, loc = len(order_deletions), len(order_creations)
         if any([lod, loc]):
             print(lod, loc)
         else:
             if self.counter % 21 == 0:
                 print(lod, loc)
+        '''
         for o in order_deletions[:4]:
             if self.cm.can_execute():
                 self.cm.add_ts_to_lists()
