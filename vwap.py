@@ -1,11 +1,13 @@
 from common_procedures import make_get_filepath, threaded, print_
-from common_functions import ts_to_date, round_dn, round_up, remove_duplicates, partition_sorted
+from common_functions import ts_to_date, round_dn, round_up, remove_duplicates, partition_sorted, \
+    flatten
 from commons import calc_other_orders, filter_orders
 from threading import Lock
 from time import time, sleep
 from typing import Callable
 import os
 import json
+import sys
 
 class Vwap:
     '''
@@ -53,26 +55,27 @@ class Vwap:
                                for s in self.symbols}
         self.ideal_shrt_sel = {s: {'price': 0.0, 'amount': 0.0, 'side': 'sell'}
                                for s in self.symbols}
-        self.ideal_borrow = {c: 0.0 for c in self.coins}
-        self.ideal_repay = {c: 0.0 for c in self.coins}
+        self.ideal_borrow = {c: 0.0 for c in self.all_coins_set}
+        self.ideal_repay = {c: 0.0 for c in self.all_coins_set}
         self.my_bids = {symbol: [] for symbol in self.symbols}
         self.my_asks = {symbol: [] for symbol in self.symbols}
-        self.borrowable = {coin: 0.0 for coin in self.coins}
-        self.previous_ts_bid_taken = {s: 0.0 for s in self.symbols}
-        self.previous_ts_ask_taken = {s: 0.0 for s in self.symbols}
+        self.open_orders = {}
         self.tradable_bnb = 0.0
-        self.prev_sel_ts = {s: 0 for s in self.symbols}
-        self.prev_loan_ts = {c: 0 for c in list(self.all_coins_set) + self.symbols + ['all']}
         self.borrow_history = {}
         self.repay_history = {}
-        self.quot_locked_in_shrt_buys = 0.0
+        self.d = {k: {} for k in set(self.symbols + list(self.all_coins_set))}
+        self.eligible_entries = []
+        self.eligible_exits = []
+        self.prev_execution_ts = 0
+        self.prev_loan_ts = {c_: 0 for c_ in sorted(self.all_coins_set) + ['all']}
+        self.prev_repay_ts = {c_: 0 for c_ in self.all_coins_set}
 
         self.time_keepers = {'update_balance': 0,
                              'update_open_orders': {symbol: 0 for symbol in self.symbols},
                              'update_my_trades': {symbol: 0 for symbol in self.symbols},
                              'update_borrow_history': {c: 0 for c in self.all_coins_set},
                              'update_repay_history': {c: 0 for c in self.all_coins_set},
-                             'locks': {symbol: 0 for symbol in self.symbols},
+                             'future_handling_lock': 0,
                              'dump_balance_log': 0}
         self.updating_intervals = {'update_balance': 25,
                                    'update_open_orders': 60,
@@ -87,10 +90,11 @@ class Vwap:
                                  for symbol in self.cc.markets}
         self.amount_precisions = {symbol: self.cc.markets[symbol]['precision']['amount']
                                   for symbol in self.cc.markets}
-        self.locks = {symbol: Lock() for symbol in self.symbols}
+        self.future_handling_lock = Lock()
         self.force_lock_release_timeout = 10
         self.running_updater = False
         self.last_stream_tick_ts = 0
+        self.counter = 0
 
     def init(self):
         self.update_balance()
@@ -98,8 +102,21 @@ class Vwap:
         for i, symbol in enumerate(self.symbols):
             coin, quot = self.symbol_split[symbol]
             calls.append(threaded(self.update_my_trades)(symbol))
-            sleep(0.1)
+            sleep(0.2)
+        recent_repays_future = {}
+        print()
+        for coin in self.all_coins_set:
+            sys.stdout.write(f'\rfetching {coin} last repay ts      ')
+            sys.stdout.flush()
+            recent_repays_future[coin] = threaded(self.fetch_repay_history)(coin)
+            sleep(0.2)
+        print()
         [call.result() for call in calls]
+        recent_repays = {c: recent_repays_future[c].result() for c in recent_repays_future}
+        self.prev_repay_ts = {c: (recent_repays[c][-1]['timestamp'] if recent_repays[c] else 0)
+                              for c in self.all_coins_set}
+        for s_ in self.symbols:
+            self.set_ideal_orders(s_)
         self.start_updater()
 
     def start_updater(self):
@@ -120,7 +137,6 @@ class Vwap:
                     if update['bids'][-1]['price'] <= self.my_bids[symbol][-1]['price']:
                         # maybe or yes
                         print_(['margin bid taken', symbol])
-                        self.previous_ts_bid_taken[symbol] = time()
                         self.time_keepers['update_balance'] = 0
             if update['asks'][0]['price'] > self.cm.previous_updates[symbol]['asks'][0]['price']:
                 # lowest ask became higher. was my ask taken
@@ -128,12 +144,9 @@ class Vwap:
                     if update['asks'][0]['price'] >= self.my_asks[symbol][0]['price']:
                         # maybe or yes
                         print_(['margin ask taken', symbol])
-                        self.previous_ts_ask_taken[symbol] = time()
                         self.time_keepers['update_balance'] = 0
-            if all([self.time_keepers[key][symbol] > 10
-                    for key in ['update_open_orders', 'update_my_trades']]):
-                self.try_wrapper(self.update_ideal_orders, (symbol,))
-                self.try_wrapper(self.execute_to_exchange, (symbol,))
+            self.try_wrapper(self.set_ideal_orders, (symbol,))
+            self.try_wrapper(self.execute_to_exchange)
             self.last_stream_tick_ts = time()
         except(Exception) as e:
             print('\n\nERROR in on_update', e)
@@ -141,25 +154,9 @@ class Vwap:
     def dump_balance_log(self):
         print_(['margin dumping balance'])
         with open(make_get_filepath(self.balance_log_filepath), 'a') as f:
-            self.balance['timestamp'] = self.cc.milliseconds()
-            line = json.dumps(self.balance) + '\n'
+            line = json.dumps({**{'timestamp': self.cc.milliseconds()}, **self.balance}) + '\n'
             f.write(line)
         self.time_keepers['dump_balance_log'] = time()
-
-    def execute(self,
-                symbol: str,
-                fns: [Callable],
-                args_list: [tuple] = [()],
-                kwargs_list: [dict] = [{}],
-                force_execution: bool = False):
-        if not fns:
-            return
-        if force_execution or self.cm.can_execute(len(fns)):
-            if self.locks[symbol].locked():
-                if time() - self.time_keepers['locks'][symbol] > self.force_lock_release_timeout:
-                    self.locks[symbol].release()
-            else:
-                threaded(self.lock_execute_release)(symbol, fns, args_list, kwargs_list)
 
     def updater(self):
         while self.running_updater:
@@ -184,46 +181,12 @@ class Vwap:
                                 threaded(getattr(self, key))()
                         sleep(0.01)
                 sleep(1)
-                if now - self.last_stream_tick_ts > 30:
-                    print_(['warning, more than 30 seconds since last websocket tick',
+                if (secs_since_tick := now - self.last_stream_tick_ts) > 30:
+                    print_([f'warning, {secs_since_tick} seconds since last websocket tick',
                             'streamer probably not running'])
             except(Exception) as e:
                 print('ERROR with updater\n\n', e)
                 raise Exception(e)
-
-    def lock_execute_release(self,
-                             symbol: str,
-                             fns: [Callable],
-                             args_list: [tuple],
-                             kwargs_list: [dict]):
-        try:
-            self.locks[symbol].acquire()
-            self.time_keepers['locks'][symbol] = time()
-            self.cm.add_ts_to_lists(len(fns))
-            future_results = []
-            for i in range(len(fns)):
-                args = args_list[i] if len(args_list) > i else ()
-                kwargs = kwargs_list[i] if len(kwargs_list) > i else {}
-                future_result = threaded(fns[i])(*args, **kwargs)
-                future_results.append(future_result)
-            for future_result in future_results:
-                if future_result.exception():
-                    if 'Unknown order sent' in future_result.exception().args[0]:
-                        print_(['ERROR', 'margin', symbol,
-                               'trying to cancel non-existing order; schedule open orders update'])
-                        self.time_keepers['update_open_orders'][symbol] = 0
-                    elif 'Account has insufficient balance' in future_result.exception().args[0]:
-                        print_(['ERROR', 'margin', symbol, fns[i].__name__, args,
-                                'insufficient funds; schedule balance update'])
-                        self.time_keepers['update_balance'] = 0
-                    else:
-                        print_(['ERROR', 'margin', symbol, future_result.exception(),
-                                fns, args_list])
-                else:
-                    self.try_wrapper(self.update_after_execution, (future_result.result(),))
-            self.locks[symbol].release()
-        except(Exception) as e:
-            print('\n\nERROR with lock_execute_release', e)
 
     def update_after_execution(self, update: dict):
         if update is None:
@@ -234,6 +197,8 @@ class Vwap:
             symbol = update['symbol']
             coin, quot = self.symbol_split[symbol]
             if update['status'] == 'canceled':
+                self.open_orders[symbol] = \
+                    [o for o in self.open_orders[symbol] if o['id'] != update['id']]
                 if update['side'] == 'buy':
                     self.my_bids[symbol] = \
                         [e for e in self.my_bids[symbol] if e['id'] != update['id']]
@@ -243,6 +208,10 @@ class Vwap:
                         [e for e in self.my_asks[symbol] if e['id'] != update['id']]
                     self.balance[coin]['free'] += update['amount']
             elif update['type'] == 'limit':
+                if symbol in self.open_orders:
+                    self.open_orders[symbol].append(update)
+                else:
+                    self.open_orders[symbol] = [update]
                 if update['side'] == 'buy':
                     self.my_bids[symbol] = sorted(self.my_bids[symbol] + [update],
                                                   key=lambda x: x['price'])
@@ -317,6 +286,7 @@ class Vwap:
             symbols = set()
             self.my_asks = {s: [] for s in self.symbols}
             self.my_bids = {s: [] for s in self.symbols}
+            self.open_orders = {}
             for oo in sorted(self.fetch_margin_open_orders(),
                              key=lambda x: (x['symbol'], x['price'])):
                 symbols.add(oo['symbol'])
@@ -328,10 +298,15 @@ class Vwap:
                     if oo['symbol'] not in self.my_asks:
                         self.my_asks[oo['symbol']] = []
                     self.my_asks[oo['symbol']].append(oo)
+                try:
+                    self.open_orders[oo['symbol']].append(oo)
+                except(KeyError):
+                    self.open_orders[oo['symbol']] = [oo]
         else:
             symbols = [symbol]
             open_orders = self.fetch_margin_open_orders(symbol)
             self.my_bids[symbol], self.my_asks[symbol] = [], []
+            self.open_orders[symbol] = open_orders
             for oo in sorted(open_orders, key=lambda x: x['price']):
                 if oo['side'] == 'buy':
                     self.my_bids[symbol].append(oo)
@@ -374,13 +349,30 @@ class Vwap:
         written_history = self.write_cache(cache_filepath, fetched_history)
         my_trades = remove_duplicates(cached_history + written_history,
                                       key='id', sort=True)
+        self.set_analysis(symbol, my_trades)
+        self.time_keepers['update_my_trades'][symbol] = time()
+
+    def set_analysis(self, s: str, my_trades: [dict]):
         age_limit_millis = max(self.cc.milliseconds() - self.hyperparams['max_memory_span_millis'],
                                self.hyperparams['snapshot_timestamp_millis'])
-
-        my_trades = [e for e in my_trades if e['timestamp'] > age_limit_millis]
-        self.my_trades[symbol], self.my_trades_analyses[symbol] = \
-            analyze_my_trades(my_trades)
-        self.time_keepers['update_my_trades'][symbol] = time()
+        my_trades_cropped, analysis = analyze_my_trades(
+            [mt for mt in my_trades if mt['timestamp'] > age_limit_millis]
+        )
+        analysis['long_cost_vol'], analysis['shrt_cost_vol'] = \
+            calc_rolling_cost_vol(my_trades_cropped,
+                                  analysis['small_big_amount_threshold'],
+                                  (self.cc.milliseconds() -
+                                   self.hyperparams['millis_rolling_small_trade_window']))
+        analysis['long_sel_price'] = round_up(
+            analysis['true_long_vwap'] * self.hyperparams['profit_pct_plus'],
+            self.price_precisions[s]
+        )
+        analysis['shrt_buy_price'] = round_dn(
+            analysis['true_shrt_vwap'] * self.hyperparams['profit_pct_minus'],
+            self.price_precisions[s]
+        )
+        self.my_trades[s] = my_trades_cropped
+        self.my_trades_analyses[s] = analysis
 
     def write_cache(self, filepath: str, items: [dict], condition: Callable = lambda x: True):
         written_items = []
@@ -410,19 +402,14 @@ class Vwap:
                 fetched_my_trades = self.fetch_margin_my_trades(
                     symbol, limit=limit, from_id=fetched_my_trades[-1]['id'] + 1)
                 new_my_trades += fetched_my_trades
+            my_trades = self.my_trades[symbol]
             if new_my_trades:
                 no_dash = symbol.replace('/', '_')
                 cache_filepath = f'cache/binance/{self.user}/my_trades/{no_dash}/'
                 condition = lambda x: x['id'] > self.my_trades[symbol][-1]['id']
                 written_my_trades = self.write_cache(cache_filepath, new_my_trades, condition)
-                self.my_trades[symbol], self.my_trades_analyses[symbol] = \
-                    analyze_my_trades(self.my_trades[symbol] + written_my_trades)
-
-            age_limit_millis = \
-                max(self.cc.milliseconds() - self.hyperparams['max_memory_span_millis'],
-                    self.hyperparams['snapshot_timestamp_millis'])
-            my_trades = [e for e in self.my_trades[symbol] if e['timestamp'] > age_limit_millis]
-            self.my_trades[symbol] = my_trades
+                my_trades += written_my_trades
+            self.set_analysis(symbol, my_trades)
             self.time_keepers['update_my_trades'][symbol] = time()
 
     def fetch_margin_my_trades(self, symbol: str, limit: int, from_id: int = -1):
@@ -536,328 +523,362 @@ class Vwap:
         repaid['timestamp'] = self.cc.milliseconds()
         return repaid
 
-    def update_ideal_orders(self, s: str):
+    def set_ideal_orders(self, s: str):
+
         coin, quot = self.symbol_split[s]
 
+        # prepare data
         other_bids = calc_other_orders(self.my_bids[s], self.cm.order_book[s]['bids'])
         other_asks = calc_other_orders(self.my_asks[s], self.cm.order_book[s]['asks'])
 
-        highest_other_bid = sorted(other_bids, key=lambda x: x['price'])[-1] if other_bids else \
-            self.my_bids[s][-1]
-        lowest_other_ask = sorted(other_asks, key=lambda x: x['price'])[0] if other_asks else \
-            self.my_asks[s][0]
+        highest_other_bid = \
+            sorted(other_bids, key=lambda x: x['price'])[-1] if other_bids else self.my_bids[s][-1]
+        lowest_other_ask = \
+            sorted(other_asks, key=lambda x: x['price'])[0] if other_asks else self.my_asks[s][0]
 
         other_bid_incr = round(highest_other_bid['price'] + 10**-self.price_precisions[s],
                                self.price_precisions[s])
         other_ask_decr = round(lowest_other_ask['price'] - 10**-self.price_precisions[s],
                                self.price_precisions[s])
 
-        small_trade_cost_default = max(
-            self.min_trade_costs[s],
-            (self.balance[quot]['account_equity'] *
-             self.hyperparams['account_equity_pct_per_trade'])
-        )
-
+        small_trade_cost_default = max(self.min_trade_costs[s],
+                                       (self.balance[quot]['account_equity'] *
+                                        self.hyperparams['account_equity_pct_per_trade']))
         small_trade_cost = max(
             10**-self.amount_precisions[s] * self.cm.last_price[s],
             small_trade_cost_default
         )
-        approx_small_trade_amount = round_up(small_trade_cost / self.cm.last_price[s],
-                                             self.amount_precisions[s])
-        min_big_trade_amount = approx_small_trade_amount * 6
-        long_cost_vol, shrt_cost_vol = calc_rolling_cost_vol(
-            self.my_trades[s],
-            self.my_trades_analyses[s]['small_big_amount_threshold'],
-            self.cc.milliseconds() - self.hyperparams['millis_rolling_small_trade_window']
-        )
 
-        quot_locked_in_long_buys = \
-            sum([self.ideal_long_buy[s_]['amount'] * self.ideal_long_buy[s_]['price']
-                 for s_ in self.symbols])
-        max_quot_available = (self.balance[quot]['onhand'] - quot_locked_in_long_buys) * 0.99
+        self.d[s]['min_big_trade_cost'] = small_trade_cost * 6
 
-        all_shrt_buys = {}
-        for s_ in self.symbols:
-            if s_ not in self.do_shrt_buy:
-                continue
-            price_ = round_dn((self.my_trades_analyses[s_]['true_shrt_vwap'] * \
-                               self.hyperparams['profit_pct_minus']),
-                              self.price_precisions[s_])
-            c_, q_ = self.symbol_split[s_]
-            amount_ = round_up(min(self.my_trades_analyses[s_]['true_shrt_amount'],
-                                   max_quot_available / (price_ if price_ > 0.0 else 9e9)),
-                               self.amount_precisions[s_])
-            cost_ = amount_ * price_
-            all_shrt_buys[s_] = {'price': price_, 'amount': amount_, 'cost': cost_, 'symbol': s_}
 
-        quot_locked_in_shrt_buys = sum([e['cost'] for e in all_shrt_buys.values()])
-        self.quot_locked_in_shrt_buys = quot_locked_in_shrt_buys
-
-        long_sel_price = round_up((self.my_trades_analyses[s]['true_long_vwap'] *
-                                   self.hyperparams['profit_pct_plus']),
-                                  self.price_precisions[s])
-
-        # small orders #
-
-        # long_buy #
-        if s in self.do_long_buy:
-            long_buy_cost = min([small_trade_cost,
-                                 self.balance[quot]['onhand'] / len(self.symbols),
-                                 (self.balance[quot]['account_equity'] *
-                                  self.hyperparams['account_equity_pct_per_period'] -
-                                  long_cost_vol)])
-            long_buy_cost = long_buy_cost if long_buy_cost >= self.min_trade_costs[s] else 0.0
-            long_buy_price = min([
-                round_dn(self.cm.min_ema[s], self.price_precisions[s]),
-                other_ask_decr,
-                (other_bid_incr
-                 if long_buy_cost / other_bid_incr < highest_other_bid['amount']
-                 else highest_other_bid['price'])
-            ])
-            self.ideal_long_buy[s] = {
-                'side': 'buy',
-                'amount': round_up(long_buy_cost / long_buy_price, self.amount_precisions[s]),
-                'price': long_buy_price
-            }
-            if self.balance[quot]['onhand'] < quot_locked_in_long_buys:
-                # means not enough quot for all long buys
-                # select those whose price is closest to last price
-                all_long_buys = [{**self.ideal_long_buy[s_],
-                                  **{'symbol': s_, 'cost': (self.ideal_long_buy[s_]['amount'] *
-                                                            self.ideal_long_buy[s_]['price'])}}
-                                 for s_ in self.ideal_long_buy]
-                long_buys_sorted_by_dist_from_last_price = sorted(
-                    [{**e, **{'lp': self.cm.last_price[e['symbol']]}} for e in all_long_buys],
-                    key=lambda x: x['lp'] / (x['price'] if x['price'] > 0.0 else 9e-9)
-                )
-                tmp_sum = 0.0
-                eligible_long_buys = []
-                for lb in long_buys_sorted_by_dist_from_last_price:
-                    tmp_sum += lb['cost']
-                    if tmp_sum >= self.balance[quot]['onhand']:
-                        break
-                    eligible_long_buys.append(lb)
-                if s not in set(map(lambda x: x['symbol'], eligible_long_buys)):
-                    self.ideal_long_buy[s] = {'side': 'buy', 'amount': 0.0, 'price': long_buy_price}
-        else:
-            self.ideal_long_buy[s] = {'side': 'buy', 'amount': 0.0, 'price': 0.0}
-        ############
-
-        # shrt_sel #
+        # set ideal orders
         if s in self.do_shrt_sel:
-            shrt_sel_cost = min([
-                small_trade_cost,
-                self.tradable_bnb if coin == 'BNB' else self.balance[coin]['onhand'],
-                (self.balance[quot]['account_equity'] *
-                 self.hyperparams['account_equity_pct_per_period'] -
-                 shrt_cost_vol)
-            ])
-            shrt_sel_cost = shrt_sel_cost if shrt_sel_cost >= self.min_trade_costs[s] else 0.0
             shrt_sel_price = max([
                 round_up(self.cm.max_ema[s], self.price_precisions[s]),
                 other_bid_incr,
-                (other_ask_decr
-                 if shrt_sel_cost / other_ask_decr < lowest_other_ask['amount']
+                (other_ask_decr if small_trade_cost / other_ask_decr < lowest_other_ask['amount']
                  else lowest_other_ask['price'])
             ])
-            shrt_sel_amount = min(
-                round_dn(self.balance[coin]['onhand'] + self.ideal_borrow[coin],
-                         self.amount_precisions[s]),
-                round_up(shrt_sel_cost / shrt_sel_price, self.amount_precisions[s])
-            )
-            if shrt_sel_amount > self.min_trade_costs[s] / shrt_sel_price:
-                self.ideal_shrt_sel[s] = {
-                    'side': 'sell',
-                    'amount': shrt_sel_amount,
-                    'price': shrt_sel_price
-                }
-            else:
-                self.ideal_shrt_sel[s] = {'side': 'sell', 'amount': 0.0, 'price': shrt_sel_price}
-        else:
-            self.ideal_shrt_sel[s] = {'side': 'sell', 'amount': 0.0, 'price': 0.0}
-        ###########
-
-        # debt adjustments #
-
-        ideal_quot_onhand = quot_locked_in_shrt_buys + quot_locked_in_long_buys
-        self.ideal_borrow[quot] = max(0.0, min(ideal_quot_onhand - self.balance[quot]['onhand'],
-                                               self.balance[quot]['borrowable']))
-        ideal_repay_quot = max(0.0, min([self.balance[quot]['debt'],
-                                         self.balance[quot]['free'],
-                                         self.balance[quot]['onhand'] - ideal_quot_onhand]))
-        self.ideal_repay[quot] = ideal_repay_quot \
-            if ideal_repay_quot > quot_locked_in_long_buys else 0.0
-
-        #------------------#
-
-        shrt_sel_amount_ = round_up(small_trade_cost / self.ideal_shrt_sel[s]['price'],
-                                    self.amount_precisions[s]) \
-            if self.ideal_shrt_sel[s]['price'] > 0.0 else 0.0
-        ideal_coin_debt = (self.my_trades_analyses[s]['true_shrt_amount'] + shrt_sel_amount_) \
-            if coin in self.do_borrow else 0.0
-        ideal_coin_onhand = self.my_trades_analyses[s]['true_long_amount'] + shrt_sel_amount_
-
-        ideal_borrow_coin, ideal_repay_coin = 0.0, 0.0
-
-
-        if self.balance[coin]['onhand'] < shrt_sel_amount_:
-            # we have not enough coin onhand for short sell, borrow the diff
-            ideal_borrow_coin = shrt_sel_amount_ - self.balance[coin]['onhand']
-        elif self.balance[coin]['debt'] > ideal_coin_debt:
-            # we have too much debt, repay the diff, minus for short sell
-            ideal_repay_coin = min(self.balance[coin]['onhand'] - shrt_sel_amount_,
-                                   self.balance[coin]['debt'] - ideal_coin_debt)
-            if ideal_repay_coin < approx_small_trade_amount * 2:
-                ideal_repay_coin = 0.0
-        else:
-            # we do not have enough debt to match true_shrt_amount, borrow the diff
-            ideal_borrow_coin = ideal_coin_debt - self.balance[coin]['debt']
-
-        if coin in self.do_borrow and ideal_borrow_coin <= 0.0:
-            coin_missing_from_long_sel = \
-                ideal_coin_onhand - self.balance[coin]['onhand'] + ideal_repay_coin
-    
-            if coin_missing_from_long_sel > 0.0:
-                # we have not enough coin onhand to fill the whole long sell
-                # should we borrow to make up the diff?
-                if long_sel_price / self.cm.last_price[s] < 1.001:
-                    # we are less than 0.1% away from from filling the long sell
-                    # borrow to fill long sell
-                    ideal_borrow_coin = coin_missing_from_long_sel
-                    ideal_repay_coin = 0.0
-        self.ideal_borrow[coin] = max(0.0, min(self.balance[coin]['borrowable'], ideal_borrow_coin))
-        self.ideal_repay[coin] = max(0.0, min([self.balance[coin]['debt'],
-                                               self.balance[coin]['onhand'],
-                                               ideal_repay_coin]))
-
-        ####################
-
-        # big orders #
-
-        # long_sel #
-        if s in self.do_long_sel:
-            long_sel_amount = (
-                (self.tradable_bnb if coin == 'BNB' else self.balance[coin]['onhand']) -
-                self.ideal_shrt_sel[s]['amount'] -
-                self.ideal_repay[coin] +
-                self.ideal_borrow[coin]
-            )
-            long_sel_amount = max(0.0, round_dn(long_sel_amount, self.amount_precisions[s]))
-            if long_sel_amount > min_big_trade_amount:
-                long_sel_price = max([
-                    round_up(self.cm.max_ema[s], self.price_precisions[s]),
-                    other_bid_incr,
-                    (other_ask_decr
-                     if long_sel_amount < lowest_other_ask['amount']
-                     else lowest_other_ask['price']),
-                    long_sel_price
-                ])
-            else:
-                long_sel_price = 0.0
-            self.ideal_long_sel[s] = {'side': 'sell',
-                                      'amount': long_sel_amount,
-                                      'price': long_sel_price}
-        else:
-            self.ideal_long_sel[s] = {'side': 'sell', 'amount': 0.0, 'price': 0.0}
-        ############
-
-        # shrt_buy #
-        if s in self.do_shrt_buy:
-            shrt_buy_amount = min(max_quot_available / (all_shrt_buys[s]['price']
-                                                        if all_shrt_buys[s]['price'] else 9e9),
-                                  max(self.my_trades_analyses[s]['true_shrt_amount'],
-                                      (self.balance[coin]['debt'] +
-                                       self.ideal_borrow[coin] -
-                                       self.ideal_repay[coin] -
-                                       self.ideal_shrt_sel[s]['amount'])))
-            shrt_buy_amount = round_up(shrt_buy_amount, self.amount_precisions[s])
-            shrt_buy_price = min([
+            shrt_sel_amount = max(0.0, min(
+                small_trade_cost,
+                (self.balance[quot]['account_equity'] *
+                 self.hyperparams['account_equity_pct_per_period'] -
+                 self.my_trades_analyses[s]['shrt_cost_vol'])) / shrt_sel_price)
+            self.ideal_shrt_sel[s] = {
+                'side': 'sell',
+                'amount': (ssar if (ssar := round_up(shrt_sel_amount, self.amount_precisions[s])) *
+                           shrt_sel_price >= self.min_trade_costs[s] else 0.0),
+                'price': shrt_sel_price
+            }
+        if s in self.do_long_buy:
+            long_buy_price = min([
                 round_dn(self.cm.min_ema[s], self.price_precisions[s]),
                 other_ask_decr,
-                (other_bid_incr
-                 if shrt_buy_amount < highest_other_bid['amount']
-                 else highest_other_bid['price']),
-                all_shrt_buys[s]['price'],
+                (other_bid_incr if small_trade_cost / other_bid_incr < highest_other_bid['amount']
+                 else highest_other_bid['price'])
             ])
-            if shrt_buy_amount > min_big_trade_amount:
-                quot_available = (self.balance[quot]['onhand'] +
-                                  self.ideal_borrow[quot] -
-                                  self.ideal_repay[quot]) 
-                if quot_available < ideal_quot_onhand:
-                    # means we are max leveraged
-                    shrt_buys_sorted_by_price_diff = sorted(
-                        [e for e in all_shrt_buys.values()
-                         if e['cost'] > small_trade_cost_default * 6],
-                        key=lambda x: self.cm.last_price[x['symbol']] / x['price']
-                    )
-                    tmp_sum = quot_locked_in_long_buys
-                    eligible_shrt_buys = []
-                    for sb in shrt_buys_sorted_by_price_diff:
-                        tmp_sum += sb['cost']
-                        if tmp_sum >= self.balance[quot]['onhand']:
-                            break
-                        eligible_shrt_buys.append(sb)
-                    if s not in set(map(lambda x: x['symbol'], eligible_shrt_buys)):
-                        shrt_buy_price = 0.0
+            long_buy_amount = max(0.0, min(
+                small_trade_cost,
+                (self.balance[quot]['account_equity'] *
+                 self.hyperparams['account_equity_pct_per_period'] -
+                 self.my_trades_analyses[s]['long_cost_vol'])) / long_buy_price)
+            self.ideal_long_buy[s] = {
+                'side': 'buy',
+                'amount': (lbar if (lbar := round_up(long_buy_amount, self.amount_precisions[s])) *
+                           long_buy_price >= self.min_trade_costs[s] else 0.0),
+                'price': long_buy_price
+            }
+        if s in self.do_shrt_buy:
+            self.ideal_shrt_buy[s] = {
+                'side': 'buy',
+                'amount': round_up(self.my_trades_analyses[s]['true_shrt_amount'],
+                                   self.amount_precisions[s]),
+                'price': min(self.my_trades_analyses[s]['shrt_buy_price'],
+                             self.ideal_long_buy[s]['price'])
+            }
+        if s in self.do_long_sel:
+            self.ideal_long_sel[s] = {
+                'side': 'sell',
+                'amount': round_up(self.my_trades_analyses[s]['true_long_amount'],
+                                   self.amount_precisions[s]),
+                'price': max(self.my_trades_analyses[s]['long_sel_price'],
+                             self.ideal_shrt_sel[s]['price'])
+            }
+
+    def allocate_credit(self):
+        # allocate credit and select eligible orders
+        # default repay all debt
+        # borrow to cover entries
+        # if any exit is close to filling, borrow to cover exit(s)
+        credit_available_quot = self.balance[self.quot]['borrowable'] * 0.995
+        borrows = {c_: -min(self.balance[c_]['debt'],
+                            (self.balance[c_]['onhand'] -
+                             (self.ideal_shrt_sel[s_]['amount']
+                              if (s_ := f'{c_}/{self.quot}') in self.ideal_shrt_sel else 0.0)))
+                   for c_ in self.all_coins_set}
+        coin_available = {
+            c_: (self.tradable_bnb if c_ == 'BNB' else self.balance[c_]['onhand']) + borrows[c_]
+            for c_ in self.all_coins_set
+        }
+        long_buys = \
+            [{**{'symbol': s_,
+                 'lp_diff': (self.cm.last_price[s_] / self.ideal_long_buy[s_]['price'])},
+              **self.ideal_long_buy[s_]} for s_ in self.ideal_long_buy
+             if s_ in self.do_long_buy and self.ideal_long_buy[s_]['amount'] > 0.0]
+        shrt_sels = \
+            [{**{'symbol': s_,
+                 'lp_diff': (self.ideal_shrt_sel[s_]['price'] / self.cm.last_price[s_])},
+              **self.ideal_shrt_sel[s_]} for s_ in self.ideal_shrt_sel
+             if s_ in self.do_shrt_sel and self.ideal_shrt_sel[s_]['amount'] > 0.0]
+        entries = sorted(long_buys + shrt_sels, key=lambda x: x['lp_diff'])
+        eligible_entries = []
+        for entry in entries:
+            c_, q_ = self.symbol_split[entry['symbol']]
+            if entry['side'] == 'sell':
+                if (diff := entry['amount'] - coin_available[c_]) > 0.0:
+                    # not enough coin onhand, borrow
+
+                    to_borrow = min(credit_available_quot / entry['price'], diff)
+                    borrows[c_] += to_borrow
+                    credit_available_quot -= to_borrow * entry['price']
+                    if coin_available[c_] + to_borrow >= entry['amount']:
+                        eligible_entries.append(entry)
+                        coin_available[c_] += (to_borrow - entry['amount'])
+                else:
+                    eligible_entries.append(entry)
+                    coin_available[c_] -= entry['amount']
             else:
-                shrt_buy_price = 0.0
-            self.ideal_shrt_buy[s] = {'side': 'buy',
-                                      'amount': shrt_buy_amount,
-                                      'price': shrt_buy_price}
-        else:
-            self.ideal_shrt_buy[s] = {'side': 'buy', 'amount': 0.0, 'price': 0.0}
+                entry_cost = entry['amount'] * entry['price']
+                if (diff := entry_cost - self.balance[q_]['onhand']) > 0.0:
+                    to_borrow = min(credit_available_quot, diff)
+                    borrows[q_] += to_borrow
+                    credit_available_quot -= to_borrow
+                    if coin_available[q_] + to_borrow >= entry_cost:
+                        eligible_entries.append(entry)
+                        coin_available[q_] += (to_borrow - entry_cost)
+                else:
+                    eligible_entries.append(entry)
+                    coin_available[q_] -= entry_cost
 
-    def execute_to_exchange(self, s: str):
-        # s == symbol
+        shrt_buys = \
+            [{**{'symbol': s_,
+                 'lp_diff': (self.cm.last_price[s_] / self.ideal_shrt_buy[s_]['price'])},
+              **self.ideal_shrt_buy[s_]} for s_ in self.ideal_shrt_buy
+             if (self.ideal_shrt_buy[s_]['amount'] *
+                 self.ideal_shrt_buy[s_]['price']) > self.d[s_]['min_big_trade_cost']]
+        long_sels = \
+            [{**{'symbol': s_,
+                 'lp_diff': (self.ideal_long_sel[s_]['price'] / self.cm.last_price[s_])},
+              **self.ideal_long_sel[s_]} for s_ in self.ideal_long_sel
+             if (self.ideal_long_sel[s_]['amount'] *
+                 self.ideal_long_sel[s_]['price']) > self.d[s_]['min_big_trade_cost']]
+        exits = sorted(long_sels + shrt_buys, key=lambda x: x['lp_diff'])
+        eligible_exits = []
+        for exit in exits:
+            c_, q_ = self.symbol_split[exit['symbol']]
+            price_div_last_price = exit['price'] / self.cm.last_price[exit['symbol']]
+            if price_div_last_price == 0.0:
+                continue
+            if exit['side'] == 'sell':
+                if price_div_last_price > 1.02:
+                    continue
+                if (diff := exit['amount'] - coin_available[c_]) > 0.0:
+                    if (credit_available_coin := credit_available_quot / exit['price']) < diff:
+                        # we do partial exit
+                        partial_exit_cost = \
+                            credit_available_quot + coin_available[c_] * exit['price']
+                        if partial_exit_cost >= self.d[exit['symbol']]['min_big_trade_cost']:
+                            exit['partial_amount'] = round_dn(
+                                partial_exit_cost / exit['price'],
+                                self.amount_precisions[exit['symbol']])
+                            borrows[c_] += credit_available_quot / exit['price']
+                            credit_available_quot = 0.0
+                            coin_available[c_] = 0.0
+                            eligible_exits.append(exit)
+                    else:
+                        # we do full exit
+                        eligible_exits.append(exit)
+                        coin_available[c_] += (diff - exit['amount'])
+                        borrows[c_] += diff
+                        credit_available_quot -= diff * exit['price']
+                else:
+                    eligible_exits.append(exit)
+                    coin_available[c_] -= exit['amount']
+            else:
+                if price_div_last_price < 0.98:
+                    continue
+                exit_cost = exit['amount'] * exit['price']
+                if (diff := exit_cost - coin_available[q_]) > 0.0:
+                    if credit_available_quot < diff:
+                        # we do partial exit
+                        partial_exit_cost = coin_available[q_] + credit_available_quot
+                        if partial_exit_cost >= self.d[exit['symbol']]['min_big_trade_cost']:
+                            exit['partial_amount'] = round_dn(
+                                (coin_available[q_] + credit_available_quot) / exit['price'],
+                                self.amount_precisions[exit['symbol']]
+                            )
+                            eligible_exits.append(exit)
+                            borrows[q_] += credit_available_quot
+                            credit_available_quot = 0.0
+                            coin_available[q_] = 0.0
+                    else:
+                        # we do full exit
+                        eligible_exits.append(exit)
+                        credit_available_quot -= diff
+                        coin_available[q_] += (diff - exit['amount'] * exit['price'])
+                        borrows[q_] += diff
+                else:
+                    eligible_exits.append(exit)
+                    coin_available[q_] -= exit_cost
+        self.eligible_entries = [{k: e[k] for k in ['symbol', 'side', 'amount', 'price']}
+                                 for e in eligible_entries]
+        pa = 'partial_amount'
+        self.eligible_exits = [{k.replace('partial_', ''): e[k]
+                                for k in ['symbol', 'side', (pa if pa in e else 'amount'), 'price']}
+                               for e in eligible_exits]
 
-        coin, quot = self.symbol_split[s]
-        for ts in [self.time_keepers['update_balance'],
-                   self.time_keepers['update_my_trades'][s],
-                   self.time_keepers['update_open_orders'][s]]:
-            if ts < 11:
-                return
+        for c_ in borrows:
+            self.ideal_borrow[c_] = max(0.0, borrows[c_])
+            self.ideal_repay[c_] = max(0.0, -borrows[c_])
 
+        for s_ in self.symbols:
+            c_, q_ = self.symbol_split[s_]
+            # selling leftovers
+            sel_amount = ((self.tradable_bnb if c_ == 'BNB' else self.balance[c_]['onhand']) -
+                          self.my_trades_analyses[s_]['true_long_amount'] -
+                          self.ideal_shrt_sel[s_]['amount'] -
+                          self.ideal_repay[c_])
+            sel_price = self.my_trades_analyses[s_]['long_sel_price']
+            if sel_amount * sel_price > self.d[s_]['min_big_trade_cost']:
+                self.eligible_exits.append(
+                    {'symbol': s_,
+                     'side': 'sell',
+                     'amount': round_dn(sel_amount, self.amount_precisions[s_]),
+                     'price': sel_price}
+                )
+            # buying remaining debt
+            buy_amount = (self.balance[c_]['debt'] -
+                          self.my_trades_analyses[s_]['true_shrt_amount'])
+            buy_price = self.my_trades_analyses[s_]['shrt_buy_price']
+            if buy_amount * buy_price > self.d[s_]['min_big_trade_cost']:
+                self.eligible_exits.append(
+                    {'symbol': s_,
+                     'side': 'buy',
+                     'amount': round_up(buy_amount, self.amount_precisions[s_]),
+                     'price': buy_price}
+                )
+
+
+
+
+    def execute_to_exchange(self):
         now = time()
-        for side in ['borrow', 'repay']:
-            for coin_ in [quot, coin]:
-                amount = getattr(self, f'ideal_{side}')[coin_]
-                if amount > 0.0 and now - self.prev_loan_ts[s] > 10 and \
-                        now - self.prev_loan_ts[coin_] > 10 and \
-                        now - self.prev_loan_ts['all'] > 1:
-                    self.try_wrapper(self.execute, (s, [getattr(self, side)], [(coin_, amount)]))
-                    self.prev_loan_ts[s] = now
-                    self.prev_loan_ts[coin_] = now
-                    self.prev_loan_ts['all'] = now
+        if now - self.prev_execution_ts < 1.0: # min 1 second between executions to exchange
+            return
+        self.counter += 1
+        self.try_wrapper(self.allocate_credit)
+        self.prev_execution_ts = time()
+        if any([self.time_keepers['update_my_trades'][s] < 11 for s in self.symbols]) or \
+                any([self.time_keepers['update_open_orders'][s] < 11 for s in self.symbols]) or \
+                self.time_keepers['update_balance'] < 11:
+            return # don't execute if any unfinished updates of my_trades, open_orders or balance
 
-        ideal_bids = [bid for bid in [self.ideal_long_buy[s], self.ideal_shrt_buy[s]]
-                      if bid['amount'] > 0.0 and bid['price'] > 0.0]
+        if self.future_handling_lock.locked():
+            if time() - self.time_keepers['future_handling_lock'] > self.force_lock_release_timeout:
+                self.future_handling_lock.release()
+            else:
+                return # don't execute if unfinished previous execution
 
-        bid_deletions, bid_creations = filter_orders(self.my_bids[s], ideal_bids)
+        future_results = []
 
-        fns = []
-        args_list = []
-        if bid_deletions:
-            fns += [self.cancel_margin_order] * min(len(bid_deletions), 3)
-            args_list += [(deletion['id'], s) for deletion in bid_deletions[:3]]
-        if bid_creations:
-            fns += [self.create_margin_bid] * len(bid_creations)
-            args_list += [(s, creation['amount'], creation['price']) for creation in bid_creations]
-        self.try_wrapper(self.execute, (s, fns, args_list))
+        now_millis = self.cc.milliseconds()
+        if now_millis - self.prev_loan_ts['all'] > 1000 * 2: # min 2 sec between borrow/repay
+            for coin in self.all_coins_set:
+                if now_millis - self.prev_loan_ts[coin] < 1000 * 60 * 2:
+                    continue # min 2 min between consecutive same coin borrow/repay
+                amount = self.ideal_borrow[coin]
+                if amount > 0.0 and amount <= self.balance[coin]['borrowable']:
+                    future_results.append((coin, self.borrow, threaded(self.borrow)(coin, amount)))
+                    self.ideal_borrow[coin] = 0.0
+                    self.prev_loan_ts[coin] = now_millis
+                    self.prev_loan_ts['all'] = now_millis
+                    break
+                amount = self.ideal_repay[coin]
+                if amount > 0.0 and amount <= self.balance[coin]['free'] and \
+                        now_millis - self.prev_repay_ts[coin] > 59 * 60 * 1000:
+                    # min 59 min between consecutive same coin repay
+                    future_results.append((coin, self.repay, threaded(self.repay)(coin, amount)))
+                    self.ideal_repay[coin] = 0.0
+                    self.balance[coin]['debt'] -= amount
+                    self.prev_loan_ts[coin] = now_millis
+                    self.prev_loan_ts['all'] = now_millis
+                    self.prev_repay_ts[coin] = now_millis
+    
+                    break
 
-        ideal_asks = [ask for ask in [self.ideal_shrt_sel[s], self.ideal_long_sel[s]]
-                      if ask['amount'] > 0.0 and ask['price'] > 0.0]
+        order_deletions, order_creations = \
+            filter_orders(flatten(self.open_orders.values()),
+                          self.eligible_entries + self.eligible_exits)
+        lod, loc = len(order_deletions), len(order_creations)
+        if any([lod, loc]):
+            print('deletion queue', lod, 'creation queue', loc)
+        else:
+            if self.counter % 21 == 0:
+                print('deletion queue', lod, 'creation queue', loc)
+        for o in order_deletions[:4]:
+            if self.cm.can_execute():
+                self.cm.add_ts_to_lists()
+                fn = self.cancel_margin_order
+                future_results.append(
+                    (o['symbol'], fn, threaded(fn)(o['id'], o['symbol'])))
+        k = 0
+        for o in order_creations:
+            if k >= 3:
+                break
+            if self.cm.can_execute():
+                if o['side'] == 'buy':
+                    if o['amount'] * o['price'] > self.balance[self.quot]['free']:
+                        continue
+                else:
+                    if o['amount'] > self.balance[self.symbol_split[o['symbol']][0]]['free']:
+                        continue
+                self.cm.add_ts_to_lists()
+                fn = getattr(self, f"create_margin_{'bid' if o['side'] == 'buy' else 'ask'}")
+                future_results.append(
+                  (o['symbol'], fn, threaded(fn)(o['symbol'], o['amount'], o['price'])))
+                k += 1
 
-        ask_deletions, ask_creations = filter_orders(self.my_asks[s], ideal_asks)
+        threaded(self.handle_future_results)(future_results)
 
-        fns = []
-        args_list = []
-        if ask_deletions:
-            fns += [self.cancel_margin_order] * min(len(ask_deletions), 3)
-            args_list += [(deletion['id'], s) for deletion in ask_deletions[:3]]
-        if ask_creations:
-            fns += [self.create_margin_ask] * len(ask_creations)
-            args_list += [(s, creation['amount'], creation['price']) for creation in ask_creations]
-        self.try_wrapper(self.execute, (s, fns, args_list))
+    def handle_future_results(self, future_results: [tuple]):
+        try:
+            if future_results is None:
+                return
+            self.future_handling_lock.acquire()
+            self.time_keepers['future_handling_lock'] = time()
+            for symbol, fn, result in future_results:
+                if result.exception():
+                    if 'Unknown order sent' in result.exception().args[0]:
+                        print_(['ERROR', 'margin', symbol,
+                               'trying to cancel non-existing order; schedule open orders update'])
+                        self.time_keepers['update_open_orders'][symbol] = 0
+                    elif 'Account has insufficient balance' in result.exception().args[0]:
+                        print_(['ERROR', 'margin', symbol, fn.__name__,
+                                'insufficient funds; schedule balance update'])
+                        self.time_keepers['update_balance'] = 0
+                    elif 'Balance is not enough' in result.exception().args[0]:
+                        print_(["ERROR", 'margin', symbol, fn.__name__,
+                                'balance not enough; schedule balance update'])
+                        self.time_keepers['update_balance'] = 0
+                    else:
+                        print_(['ERROR', 'margin', symbol, result.exception(),
+                                fn.__name__])
+                else:
+                    self.try_wrapper(self.update_after_execution, (result.result(),))
+            self.future_handling_lock.release()
+        except(Exception) as e:
+            print('ERROR with handle_future_results', e)
 
     def try_wrapper(self, fn, args=(), kwargs={}, comment: str = ''):
         try:
