@@ -223,9 +223,10 @@ def filter_orders(actual_orders: [dict], ideal_orders: [dict]) -> ([dict], [dict
     if not ideal_orders:
         return actual_orders, []
     orders_to_delete = []
-    ideal_orders_copy = ideal_orders.copy()
+    ideal_orders_copy = [{k: o[k] for k in ['symbol', 'side', 'amount', 'price']}
+                         for o in ideal_orders]
     for o in actual_orders:
-        o_cropped = {k: o[k] for k in ['amount', 'price', 'side']}
+        o_cropped = {k: o[k] for k in ['symbol', 'side', 'amount', 'price']}
         if o_cropped in ideal_orders_copy:
             ideal_orders_copy.remove(o_cropped)
         else:
