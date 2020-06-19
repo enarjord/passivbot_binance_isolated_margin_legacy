@@ -701,8 +701,12 @@ class Vwap:
                         borrows[c_] += diff
                         credit_available_quot -= diff * exit['price']
                 else:
+                    exit['partial_amount'] = max(
+                        round_dn(coin_available[c_], self.amount_precisions[s_]),
+                        self.ideal_long_sel[exit['symbol']]['amount']
+                    )
                     eligible_exits.append(exit)
-                    coin_available[c_] -= exit['amount']
+                    coin_available[c_] -= exit['partial_amount']
             else:
                 exit_cost = exit['amount'] * exit['price']
                 if (diff := exit_cost - coin_available[q_]) > 0.0:
@@ -726,8 +730,16 @@ class Vwap:
                         borrows[q_] += diff
                 else:
                     # we do full shrt exit with quot onhand
+                    if self.balance[coin]['debt'] > exit['amount']:
+                        exit['partial_amount'] = min(
+                            round_dn(coin_available[q_] / max(exit['price'], 9e-9),
+                                     self.amount_precisions[s_]),
+                            round_up(self.balance[coin]['debt'], self.amount_precisions[s_])
+                        )
+                        coin_available[q_] -= (exit['partial_amount'] * exit['price'])
+                    else:
+                        coin_available[q_] -= exit_cost
                     eligible_exits.append(exit)
-                    coin_available[q_] -= exit_cost
         self.eligible_entries = [{k: e[k] for k in ['symbol', 'side', 'amount', 'price']}
                                  for e in eligible_entries]
         pa = 'partial_amount'
@@ -738,36 +750,6 @@ class Vwap:
         for c_ in borrows:
             self.ideal_borrow[c_] = max(0.0, borrows[c_])
             self.ideal_repay[c_] = max(0.0, -borrows[c_])
-
-        for s_ in self.symbols:
-            c_, q_ = self.symbol_split[s_]
-            # selling leftovers
-            sel_amount = ((self.tradable_bnb if c_ == 'BNB' else self.balance[c_]['onhand']) -
-                          self.my_trades_analyses[s_]['true_long_amount'] -
-                          self.ideal_shrt_sel[s_]['amount'] -
-                          self.ideal_repay[c_])
-            sel_price = self.my_trades_analyses[s_]['long_sel_price']
-            if sel_amount * sel_price > self.d[s_]['min_big_trade_cost'] and \
-                    sel_price / self.cm.last_price[s_] <= 1.02:
-                self.eligible_exits.append(
-                    {'symbol': s_,
-                     'side': 'sell',
-                     'amount': round_dn(sel_amount, self.amount_precisions[s_]),
-                     'price': sel_price}
-                )
-            # buying to repay remaining debt
-            buy_price = self.my_trades_analyses[s_]['shrt_buy_price']
-            buy_amount = min((self.balance[c_]['debt'] -
-                              self.my_trades_analyses[s_]['true_shrt_amount']),
-                             coin_available[q_] / max(buy_price, 9e-9))
-            if buy_amount * buy_price > self.d[s_]['min_big_trade_cost'] and \
-                    self.cm.last_price[s_] / buy_price <= 1.02:
-                self.eligible_exits.append(
-                    {'symbol': s_,
-                     'side': 'buy',
-                     'amount': round_up(buy_amount, self.amount_precisions[s_]),
-                     'price': buy_price}
-                )
 
     def execute_to_exchange(self):
         now = time()
