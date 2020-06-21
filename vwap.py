@@ -614,16 +614,10 @@ class Vwap:
         # borrow to cover entries
         # if any exit is close to filling, borrow to cover exit(s)
         credit_available_quot = self.balance[self.quot]['borrowable'] * 0.995
-        borrows = {c_: -min(self.balance[c_]['debt'],
-                            (self.balance[c_]['onhand'] -
-                             (self.ideal_shrt_sel[s_]['amount']
-                              if (s_ := f'{c_}/{self.quot}') in self.ideal_shrt_sel else 0.0)))
-                   for c_ in self.all_coins_set}
-        coin_available = {
-            c_: round((self.tradable_bnb if c_ == 'BNB' else self.balance[c_]['onhand']) +
-                      borrows[c_], 8)
-            for c_ in self.all_coins_set
-        }
+
+        borrows = {c_: 0.0 for c_ in self.all_coins_set}
+        coin_available = {c_: (self.tradable_bnb if c_ == 'BNB' else self.balance[c_]['onhand'])
+                          for c_ in self.all_coins_set}
 
         long_buys = \
             [{**{'symbol': s_,
@@ -654,7 +648,7 @@ class Vwap:
                     coin_available[c_] -= entry['amount']
             else:
                 entry_cost = entry['amount'] * entry['price']
-                if (diff := entry_cost - self.balance[q_]['onhand']) > 0.0:
+                if (diff := entry_cost - coin_available[q_]) > 0.0:
                     to_borrow = min(credit_available_quot, diff)
                     borrows[q_] += to_borrow
                     credit_available_quot -= to_borrow
@@ -664,7 +658,6 @@ class Vwap:
                 else:
                     eligible_entries.append(entry)
                     coin_available[q_] -= entry_cost
-
         shrt_buys = \
             [{**{'symbol': s_,
                  'lp_diff': (self.cm.last_price[s_] / self.ideal_shrt_buy[s_]['price'])},
@@ -735,11 +728,11 @@ class Vwap:
                         borrows[q_] += diff
                 else:
                     # we do full shrt exit with quot onhand
-                    if self.balance[coin]['debt'] > exit['amount']:
+                    if self.balance[c_]['debt'] > exit['amount']:
                         exit['partial_amount'] = min(
                             round_dn(coin_available[q_] / max(exit['price'], 9e-9),
                                      self.amount_precisions[s_]),
-                            round_up(self.balance[coin]['debt'], self.amount_precisions[s_])
+                            round_up(self.balance[c_]['debt'], self.amount_precisions[s_])
                         )
                         coin_available[q_] -= (exit['partial_amount'] * exit['price'])
                     else:
@@ -753,6 +746,7 @@ class Vwap:
                                for e in eligible_exits]
 
         for c_ in borrows:
+            borrows[c_] -= min(self.balance[c_]['debt'], coin_available[c_])
             self.ideal_borrow[c_] = max(0.0, borrows[c_])
             self.ideal_repay[c_] = max(0.0, -borrows[c_])
 
