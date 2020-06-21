@@ -314,7 +314,7 @@ class Vwap:
         for symbol in symbols:
             self.time_keepers['update_open_orders'][symbol] = now
 
-    def init_my_trades(self, symbol: str) -> [dict]:
+    def fetch_my_trades(self, symbol: str) -> [dict]:
         no_dash = symbol.replace('/', '_')
         cache_filepath = make_get_filepath(f'cache/binance/{self.user}/my_trades/{no_dash}/')
         cached_history = []
@@ -347,6 +347,10 @@ class Vwap:
         written_history = self.write_cache(cache_filepath, fetched_history)
         my_trades = remove_duplicates(cached_history + written_history,
                                       key='id', sort=True)
+        return my_trades
+
+    def init_my_trades(self, symbol: str):
+        my_trades = self.fetch_my_trades(symbol)
         self.set_analysis(symbol, my_trades)
         self.time_keepers['update_my_trades'][symbol] = time()
 
@@ -676,7 +680,8 @@ class Vwap:
         exits = sorted(long_sels + shrt_buys, key=lambda x: x['lp_diff'])
         eligible_exits = []
         for exit in exits:
-            c_, q_ = self.symbol_split[exit['symbol']]
+            s_ = exit['symbol']
+            c_, q_ = self.symbol_split[s_]
             if exit['lp_diff'] == 0.0 or exit['lp_diff'] > 1.02:
                 continue
             if exit['side'] == 'sell':
@@ -686,10 +691,10 @@ class Vwap:
                         # we do partial exit
                         partial_exit_cost = \
                             credit_available_quot + coin_available[c_] * exit['price']
-                        if partial_exit_cost >= self.d[exit['symbol']]['min_big_trade_cost']:
+                        if partial_exit_cost >= self.d[s_]['min_big_trade_cost']:
                             exit['partial_amount'] = round_dn(
                                 partial_exit_cost / exit['price'],
-                                self.amount_precisions[exit['symbol']])
+                                self.amount_precisions[s_])
                             borrows[c_] += credit_available_coin
                             credit_available_quot = 0.0
                             coin_available[c_] = 0.0
@@ -703,7 +708,7 @@ class Vwap:
                 else:
                     exit['partial_amount'] = max(
                         round_dn(coin_available[c_], self.amount_precisions[s_]),
-                        self.ideal_long_sel[exit['symbol']]['amount']
+                        self.ideal_long_sel[s_]['amount']
                     )
                     eligible_exits.append(exit)
                     coin_available[c_] -= exit['partial_amount']
@@ -713,10 +718,10 @@ class Vwap:
                     if credit_available_quot < diff:
                         # we do partial exit
                         partial_exit_cost = coin_available[q_] + credit_available_quot
-                        if partial_exit_cost >= self.d[exit['symbol']]['min_big_trade_cost']:
+                        if partial_exit_cost >= self.d[s_]['min_big_trade_cost']:
                             exit['partial_amount'] = round_dn(
                                 (coin_available[q_] + credit_available_quot) / exit['price'],
-                                self.amount_precisions[exit['symbol']]
+                                self.amount_precisions[s_]
                             )
                             eligible_exits.append(exit)
                             borrows[q_] += credit_available_quot
