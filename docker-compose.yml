@@ -1,0 +1,9 @@
+version: '3'
+services:
+  flask:
+    container_name: passivebot
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - "./:/app"
