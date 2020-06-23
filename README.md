@@ -132,7 +132,7 @@ about the settings:
                                                 #
     "account_equity_pct_per_trade": 0.0006,     # percentage of total account equity to spend per symbol per trade
     "account_equity_pct_per_hour": 0.0045,      # percentage of total account equity to spend per symbol per hour
-    "hours_rolling_small_trade_window": 1.0,    # eg. if (past 1 hours long buy volume) > threshold: don't place long bid
+    "hours_rolling_small_trade_window": 1.0,    # eg. if (past 1 hour long buy volume) > threshold: don't place long bid
     "bnb_buffer": 50.3,                         # BNB buffer for paying fees and interest, and for vip status
     "max_memory_span_days": 60,                 # how many days past the bot will take trade history into account
     "snapshot_timestamp_millis": 0,             # timestamp in millis from which bot will take trade history into account
@@ -168,11 +168,11 @@ one short exit: big bid
 
 it will automatically analyze past trades and make appropriate long and short exits
 
-each market pair's volume is throttled by the rolling past 3 hours (default settings) same side volume:
+each market pair's volume is throttled by the rolling past 1 hour (default settings) same side volume:
 
-if (past 3 hours long buy volume) > threshold: don't place long bid
+if (past 1 hour long buy volume) > threshold: don't place long bid
 
-if (past 3 hours short sell volume) > threshold: don't place short ask
+if (past 1 hour short sell volume) > threshold: don't place short ask
 
 
 if an exit is taken, will reset the correspondig side's timer
