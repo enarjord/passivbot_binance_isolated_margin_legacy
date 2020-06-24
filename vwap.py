@@ -675,7 +675,7 @@ class Vwap:
         for exit in exits:
             s_ = exit['symbol']
             c_, q_ = self.symbol_split[s_]
-            if exit['lp_diff'] == 0.0 or exit['lp_diff'] > 1.02:
+            if exit['lp_diff'] == 0.0 or exit['lp_diff'] > 1.2:
                 continue
             if exit['side'] == 'sell':
                 if (diff := exit['amount'] - coin_available[c_]) > 0.0:
