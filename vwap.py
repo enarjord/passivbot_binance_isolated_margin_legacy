@@ -562,10 +562,17 @@ class Vwap:
                 (other_ask_decr if small_trade_cost / other_ask_decr < lowest_other_ask['amount']
                  else lowest_other_ask['price'])
             ])
+            shrt_amount_modifier = max(
+                1.0,
+                min(
+                    5.0,
+                    (self.cm.last_price[s] / self.my_trades_analyses[s]['shrt_buy_price'])**15
+                )
+            ) if self.my_trades_analyses[s]['shrt_buy_price'] > 0.0 else 1.0
             shrt_sel_amount = max(0.0, min(
-                small_trade_cost,
+                small_trade_cost * shrt_amount_modifier,
                 (self.balance[quot]['account_equity'] *
-                 self.hyperparams['account_equity_pct_per_period'] -
+                 self.hyperparams['account_equity_pct_per_period'] * shrt_amount_modifier -
                  self.my_trades_analyses[s]['shrt_cost_vol'])) / shrt_sel_price)
             self.ideal_shrt_sel[s] = {
                 'side': 'sell',
@@ -580,10 +587,17 @@ class Vwap:
                 (other_bid_incr if small_trade_cost / other_bid_incr < highest_other_bid['amount']
                  else highest_other_bid['price'])
             ])
+            long_amount_modifier = max(
+                1.0,
+                min(
+                    5.0,
+                    (self.my_trades_analyses[s]['long_sel_price'] / self.cm.last_price[s])**15
+                )
+            )
             long_buy_amount = max(0.0, min(
-                small_trade_cost,
+                small_trade_cost * long_amount_modifier,
                 (self.balance[quot]['account_equity'] *
-                 self.hyperparams['account_equity_pct_per_period'] -
+                 self.hyperparams['account_equity_pct_per_period'] * long_amount_modifier -
                  self.my_trades_analyses[s]['long_cost_vol'])) / long_buy_price)
             self.ideal_long_buy[s] = {
                 'side': 'buy',
