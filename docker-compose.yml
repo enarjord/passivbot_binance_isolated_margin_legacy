@@ -1,7 +1,7 @@
 version: '3'
 services:
   flask:
-    container_name: passivebot
+    container_name: passivbot
     build:
       context: .
       dockerfile: Dockerfile
