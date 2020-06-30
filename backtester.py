@@ -1,7 +1,7 @@
 import trade_data
 import pandas as pd
 import sys
-
+from common_functions import round_up, round_dn
 
 
 def get_cutoff_index(lst: [dict], age_limit: int) -> int:
@@ -11,11 +11,13 @@ def get_cutoff_index(lst: [dict], age_limit: int) -> int:
     return len(lst)
 
 
-def backtest(df: pd.DataFrame, settings: dict):
+def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
     start_quot = 1.0
     ppctminus = 1 - settings['profit_pct']
     ppctplus = 1 + settings['profit_pct']
     symbols = [c.replace('_low', '') for c in df.columns if 'low' in c]
+    if not price_precisions:
+        price_precisions = {s: 8 for s in symbols}
     lows = {s: f'{s}_low' for s in symbols}
     highs = {s: f'{s}_high' for s in symbols}
     means = {s: f'{s}_mean' for s in symbols}
@@ -50,11 +52,14 @@ def backtest(df: pd.DataFrame, settings: dict):
     past_n_hours_long_cost = {s: 0.0 for s in symbols}
     past_n_hours_shrt_cost = {s: 0.0 for s in symbols}
 
+    entry_vol = {s: 0.0 for s in symbols}
+    mean_entry_vol = 0.0001
+
     entry_bid = {s: round(df.iloc[0][means[s]], 8) for s in symbols}
     entry_ask = {s: round(df.iloc[0][means[s]], 8) for s in symbols}
 
-    exit_bid = {s: 9e-9 for s in symbols}
-    exit_ask = {s: 9e-9 for s in symbols}
+    exit_bid = {s: entry_bid[s] for s in symbols}
+    exit_ask = {s: entry_ask[s] for s in symbols}
 
     long_cost = {s: 0.0 for s in symbols}
     long_amount = {s: 0.0 for s in symbols}
@@ -109,7 +114,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                 else:
                     exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
 
-            if getattr(row, lows[s]) <= entry_bid[s]:
+            if getattr(row, lows[s]) <= entry_bid[s] and entry_vol[s] <= mean_entry_vol * 1.1:
                 li = get_cutoff_index(past_n_hours_long_entries[s], trade_window_age_limit)
                 if li > 0:
                     slc = past_n_hours_long_entries[s][:li]
@@ -129,8 +134,9 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                 'timestamp': row.Index})
                         past_rolling_long_entries[s].append(long_entries[s][-1])
                         past_n_hours_long_entries[s].append(long_entries[s][-1])
-                        past_n_hours_long_cost[s] += (long_entries[s][-1]['price'] *
-                                                      long_entries[s][-1]['amount'])
+                        past_n_hours_long_cost[s] += buy_cost
+                        entry_vol[s] += buy_cost
+                        mean_entry_vol += buy_cost / len(symbols)
                         long_amount[s] += buy_amount
                         long_cost[s] += buy_cost
                         exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
@@ -149,10 +155,12 @@ def backtest(df: pd.DataFrame, settings: dict):
                         past_n_hours_long_entries[s].append(long_entries[s][-1])
                         past_n_hours_long_cost[s] += (long_entries[s][-1]['price'] *
                                                       long_entries[s][-1]['amount'])
+                        entry_vol[s] += partial_buy_cost
+                        mean_entry_vol += partial_buy_cost / len(symbols)
                         long_amount[s] += buy_amount
                         long_cost[s] += partial_buy_cost
                         exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
-            if getattr(row, highs[s]) >= entry_ask[s]:
+            if getattr(row, highs[s]) >= entry_ask[s] and entry_vol[s] <= mean_entry_vol * 1.1:
                 si = get_cutoff_index(past_n_hours_shrt_entries[s], trade_window_age_limit)
                 if si > 0:
                     slc = past_n_hours_shrt_entries[s][:si]
@@ -172,8 +180,9 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                 'timestamp': row.Index})
                         past_rolling_shrt_entries[s].append(shrt_entries[s][-1])
                         past_n_hours_shrt_entries[s].append(shrt_entries[s][-1])
-                        past_n_hours_shrt_cost[s] += (shrt_entries[s][-1]['price'] *
-                                                      shrt_entries[s][-1]['amount'])
+                        past_n_hours_shrt_cost[s] += sel_cost
+                        entry_vol[s] += sel_cost
+                        mean_entry_vol += sel_cost / len(symbols)
                         shrt_amount[s] += sel_amount
                         shrt_cost[s] += sel_cost
                         exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
@@ -190,14 +199,15 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                 'timestamp': row.Index})
                         past_rolling_shrt_entries[s].append(shrt_entries[s][-1])
                         past_n_hours_shrt_entries[s].append(shrt_entries[s][-1])
-                        past_n_hours_shrt_cost[s] += (shrt_entries[s][-1]['price'] *
-                                                      shrt_entries[s][-1]['amount'])
+                        past_n_hours_shrt_cost[s] += partial_sel_cost
+                        entry_vol[s] += partial_sel_cost
+                        mean_entry_vol += partial_sel_cost / len(symbols)
                         shrt_amount[s] += partial_sel_amount
                         shrt_cost[s] += partial_sel_cost
                         exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
 
-            exit_ask[s] = max(exit_ask[s], entry_ask[s])
-            exit_bid[s] = min(exit_bid[s], entry_bid[s])
+            exit_ask[s] = round_up(max(exit_ask[s], entry_ask[s]), price_precisions[s])
+            exit_bid[s] = round_dn(min(exit_bid[s], entry_bid[s]), price_precisions[s])
 
             if long_cost[s] > min_exit_cost:
                 # long sel
@@ -271,8 +281,8 @@ def backtest(df: pd.DataFrame, settings: dict):
                         past_n_hours_shrt_entries[s] = []
                         past_n_hours_shrt_cost[s] = 0.0
 
-            entry_bid[s] = round(min(getattr(row, means[s]), getattr(row, min_emas[s])), 8)
-            entry_ask[s] = round(max(getattr(row, means[s]), getattr(row, max_emas[s])), 8)
+            entry_bid[s] = round_dn(min(getattr(row, means[s]), getattr(row, min_emas[s])), price_precisions[s])
+            entry_ask[s] = round_up(max(getattr(row, means[s]), getattr(row, max_emas[s])), price_precisions[s])
 
         acc_equity_quot = \
             balance[quot] + sum([balance[s2c[s]] * getattr(row, means[s]) for s in symbols])
@@ -282,8 +292,11 @@ def backtest(df: pd.DataFrame, settings: dict):
         acc_debt_quot = -sum([balance_list[-1][c] for c in balance if balance_list[-1][c] < 0.0])
         balance_list[-1]['acc_debt_quot'] = acc_debt_quot
         if row.Index % 86400000 == 0 or row.Index >= end_ts:
-            line = f'\r{((row.Index - start_ts) / ts_range) * 100:.2f}% '
+            n_millis = row.Index - start_ts
+            line = f'\r{(n_millis / ts_range) * 100:.2f}% '
             line += f'acc equity quot: {acc_equity_quot:.6f}  '
+            n_days = n_millis / 1000 / 60 / 60 / 24
+            line += f'avg daily gain: {acc_equity_quot**(1/n_days):6f}'
             sys.stdout.write(line)
             sys.stdout.flush()
     return balance_list, long_entries, shrt_entries, long_exits, shrt_exits, \
@@ -316,7 +329,3 @@ def add_emas(hlms: pd.DataFrame, ema_spans):
         min_maxs.append(pd.concat([minema, maxema], axis=1))
     df = hlms.join(pd.concat(min_maxs, axis=1))
     return df[sorted(df.columns)].dropna()
-
-
-
-
