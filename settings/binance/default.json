@@ -61,17 +61,5 @@
     "bnb_buffer": 50.3,
     "max_memory_span_days": 60,
     "snapshot_timestamp_millis": 0,
-    "ema_spans_minutes": [
-        58,
-        70,
-        84,
-        100,
-        121,
-        145,
-        174,
-        208,
-        250,
-        300,
-        360
-    ]
+    "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080]
 }
