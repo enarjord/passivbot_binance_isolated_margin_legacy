@@ -193,7 +193,9 @@ def fetch_ohlcvs(symbol: str,
         return formatted
 
     def iterate_ohlcvs(tss_covered: set):
+        max_n_tries = 10
         ohlcvs = format_ohlcvs(request_klines())
+        prev_ohlcvs = [{}]
         while True:
             yield ohlcvs
             from_ts = ohlcvs[0]['timestamp']
@@ -202,6 +204,16 @@ def fetch_ohlcvs(symbol: str,
                 from_ts -= timeframe_millis
             from_ts -= (len(ohlcvs) - 1) * timeframe_millis
             ohlcvs = format_ohlcvs(request_klines(from_ts))
+            k = 0
+            while ohlcvs[0] == prev_ohlcvs[0]:
+                print('gaps', ts_to_date(ohlcvs[0]['timestamp'] / 1000), ts_to_date(from_ts / 1000))
+                from_ts -= (len(ohlcvs) - 1) * timeframe_millis
+                ohlcvs = format_ohlcvs(request_klines(from_ts))
+                k += 1
+                if k >= max_n_tries:
+                    yield None
+                    break
+            prev_ohlcvs = ohlcvs
 
     def format_csv_loaded_ohlcvs(csv: pd.DataFrame) -> pd.DataFrame:
         if csv is None:
@@ -241,6 +253,9 @@ def fetch_ohlcvs(symbol: str,
             tss_covered = set()
         until_ts = (time() - 60 * 60 * 24 * n_days) * 1000
         for ohlcvs in iterate_ohlcvs(tss_covered):
+            if ohlcvs is None:
+                print('end of ohlcvs')
+                break
             write_to_cache(ohlcvs, columns, cache_path)
             print('fetched {} ohlcvs for {} {}'.format(
                 timeframe, symbol, ts_to_date(ohlcvs[0]['timestamp'] / 1000)))
@@ -522,12 +537,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
