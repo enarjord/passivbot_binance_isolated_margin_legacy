@@ -1,7 +1,9 @@
 import trade_data
 import pandas as pd
+import numpy as np
 import sys
 from common_functions import round_up, round_dn
+
 
 
 def get_cutoff_index(lst: [dict], age_limit: int) -> int:
@@ -53,7 +55,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
     past_n_hours_shrt_cost = {s: 0.0 for s in symbols}
 
     entry_vol = {s: 0.0 for s in symbols}
-    mean_entry_vol = 0.0001
+    #mean_entry_vol = 0.0001
 
     entry_bid = {s: round(df.iloc[0][means[s]], 8) for s in symbols}
     entry_ask = {s: round(df.iloc[0][means[s]], 8) for s in symbols}
@@ -114,14 +116,15 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                 else:
                     exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
 
-            if getattr(row, lows[s]) <= entry_bid[s] and entry_vol[s] <= mean_entry_vol * 1.1:
+            if getattr(row, lows[s]) < entry_bid[s]:# and entry_vol[s] <= #mean_entry_vol * 1.1:
                 li = get_cutoff_index(past_n_hours_long_entries[s], trade_window_age_limit)
                 if li > 0:
                     slc = past_n_hours_long_entries[s][:li]
                     past_n_hours_long_entries[s] = past_n_hours_long_entries[s][li:]
                     past_n_hours_long_cost[s] -= sum([e['price'] * e['amount'] for e in slc])
                 # long buy
-                long_modifier = max(1.0, min(5.0, (exit_ask[s] / getattr(row, means[s]))**15))
+                long_modifier = max(
+                    1.0, min(5.0, (exit_ask[s] / getattr(row, means[s]))**settings['exponent']))
                 if acc_equity_quot * account_equity_pct_per_period * long_modifier > \
                         past_n_hours_long_cost[s]:
                     buy_cost = cost * long_modifier
@@ -136,7 +139,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                         past_n_hours_long_entries[s].append(long_entries[s][-1])
                         past_n_hours_long_cost[s] += buy_cost
                         entry_vol[s] += buy_cost
-                        mean_entry_vol += buy_cost / len(symbols)
+                        #mean_entry_vol += buy_cost / len(symbols)
                         long_amount[s] += buy_amount
                         long_cost[s] += buy_cost
                         exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
@@ -156,18 +159,19 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                         past_n_hours_long_cost[s] += (long_entries[s][-1]['price'] *
                                                       long_entries[s][-1]['amount'])
                         entry_vol[s] += partial_buy_cost
-                        mean_entry_vol += partial_buy_cost / len(symbols)
+                        #mean_entry_vol += partial_buy_cost / len(symbols)
                         long_amount[s] += buy_amount
                         long_cost[s] += partial_buy_cost
                         exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
-            if getattr(row, highs[s]) >= entry_ask[s] and entry_vol[s] <= mean_entry_vol * 1.1:
+            if getattr(row, highs[s]) > entry_ask[s]:# and entry_vol[s] <= #mean_entry_vol * 1.1:
                 si = get_cutoff_index(past_n_hours_shrt_entries[s], trade_window_age_limit)
                 if si > 0:
                     slc = past_n_hours_shrt_entries[s][:si]
                     past_n_hours_shrt_entries[s] = past_n_hours_shrt_entries[s][si:]
                     past_n_hours_shrt_cost[s] -= sum([e['price'] * e['amount'] for e in slc])
                 # shrt sel
-                shrt_modifier = max(1.0, min(5.0, (getattr(row, means[s]) / exit_bid[s])**15))
+                shrt_modifier = max(
+                    1.0, min(5.0, (getattr(row, means[s]) / exit_bid[s])**settings['exponent']))
                 if acc_equity_quot * account_equity_pct_per_period * shrt_modifier > \
                         past_n_hours_shrt_cost[s]:
                     sel_cost = cost * shrt_modifier
@@ -182,7 +186,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                         past_n_hours_shrt_entries[s].append(shrt_entries[s][-1])
                         past_n_hours_shrt_cost[s] += sel_cost
                         entry_vol[s] += sel_cost
-                        mean_entry_vol += sel_cost / len(symbols)
+                        #mean_entry_vol += sel_cost / len(symbols)
                         shrt_amount[s] += sel_amount
                         shrt_cost[s] += sel_cost
                         exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
@@ -201,7 +205,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                         past_n_hours_shrt_entries[s].append(shrt_entries[s][-1])
                         past_n_hours_shrt_cost[s] += partial_sel_cost
                         entry_vol[s] += partial_sel_cost
-                        mean_entry_vol += partial_sel_cost / len(symbols)
+                        #mean_entry_vol += partial_sel_cost / len(symbols)
                         shrt_amount[s] += partial_sel_amount
                         shrt_cost[s] += partial_sel_cost
                         exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
@@ -212,7 +216,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
             if long_cost[s] > min_exit_cost:
                 # long sel
                 long_exit_price_list[s].append({'price': exit_ask[s], 'timestamp': row.Index})
-                if getattr(row, highs[s]) >= exit_ask[s]:
+                if getattr(row, highs[s]) > exit_ask[s]:
                     if balance[s2c[s]] >= long_amount[s]:
                         # long sel normal
                         long_sel_amount = max(balance[s2c[s]], long_amount[s])
@@ -246,7 +250,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                         past_n_hours_long_cost[s] = 0.0
             if shrt_cost[s] > min_exit_cost:
                 shrt_exit_price_list[s].append({'price': exit_bid[s], 'timestamp': row.Index})
-                if getattr(row, lows[s]) <= exit_bid[s]:
+                if getattr(row, lows[s]) < exit_bid[s]:
                     # shrt buy
                     shrt_buy_cost = shrt_amount[s] * exit_bid[s]
                     if balance[quot] >= shrt_buy_cost:
@@ -329,3 +333,76 @@ def add_emas(hlms: pd.DataFrame, ema_spans):
         min_maxs.append(pd.concat([minema, maxema], axis=1))
     df = hlms.join(pd.concat(min_maxs, axis=1))
     return df[sorted(df.columns)].dropna()
+
+
+def pseudo_trades(pstart, prange, ts_start, ts_step, p=0.1, r=8):
+    n = 100000
+    timestamps = list(np.arange(ts_start, ts_start + n * ts_step, ts_step))
+    opens = [pstart, pstart]
+    for i in range(n-len(opens)):
+        opens.append(opens[-1] * (1 + (np.random.random() - 0.5) * p * prange)) 
+    opens = np.array(opens)
+    highs = np.round(np.array(opens + np.random.random() * prange * p), r)
+    lows = np.round(np.array(opens - np.random.random() * prange * p), r)
+    closes = np.round(opens + (highs - lows) * (np.random.random() - 0.5), r)
+    return pd.DataFrame({'open': opens, 'high': highs, 'low': lows, 'close': closes},
+                         index=timestamps)
+
+
+def main():
+    from passivbot import load_settings
+    settings = load_settings('default')
+    fee = 1 - 0.0675 * 0.01 # vip1
+
+    settings['hours_rolling_small_trade_window'] = 1.0
+    settings['account_equity_pct_per_trade'] = 0.0002
+    settings['exponent'] = 15
+
+
+    symbols = [f'{c}/BTC' for c in settings['coins_long']]
+    symbols = sorted(symbols)
+    n_days = 30 * 7
+    #symbols = [s for s in symbols if not any(s.startswith(c) for c in ['VET', 'IOST'])]
+    print('loading ohlcvs')
+    high_low_means = load_hlms(symbols, n_days, no_download=True)
+    print('adding emas')
+    df = add_emas(high_low_means, settings['ema_spans_minutes'])
+
+
+    results = []
+    for aepph in list(np.linspace(0.0002, 0.002, 5).round(5)):
+        for mmsd in list(np.linspace(45, 150, 5).round().astype(int)):
+            print('testing', aepph, mmsd)
+            settings['account_equity_pct_per_hour'] = aepph
+            settings['max_memory_span_days'] = mmsd
+
+            balance_list, lentr, sentr, lexit, sexit, lexitpl, sexitpl = backtest(df, settings)
+            bldf = pd.DataFrame(balance_list).set_index('timestamp')
+            start_equity = bldf.acc_equity_quot.iloc[0]
+            end_equity = bldf.acc_equity_quot.iloc[-1]
+            n_days = (bldf.index[-1] - bldf.index[0]) / 1000 / 60 / 60 / 24
+            avg_daily_gain = (end_equity / start_equity)**(1 / n_days)
+            print()
+            print(aepph, mmsd, 'average daily gain', round(avg_daily_gain, 8))
+            print(aepph, mmsd, '    low water mark', bldf.acc_equity_quot.min())
+            print(aepph, mmsd, '   high water mark', bldf.acc_equity_quot.max())
+            print(aepph, mmsd, '              mean', bldf.acc_equity_quot.mean())
+            print(aepph, mmsd, '               end', bldf.acc_equity_quot.iloc[-1])
+
+            print('\n\n')
+
+            results.append({
+                'account_equity_pct_per_hour': aepph,
+                'max_memory_span_days': mmsd,
+                'average daily gain': avg_daily_gain,
+                'low water mark': bldf.acc_equity_quot.min(),
+                'high water mark': bldf.acc_equity_quot.max(),
+                'mean': bldf.acc_equity_quot.mean(),
+                'end': bldf.acc_equity_quot.iloc[-1],
+            })
+    for r in sorted(results, key=lambda x: x['mean']):
+        print(r)
+
+
+if __name__ == '__main__':
+    main()
