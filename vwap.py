@@ -93,6 +93,7 @@ class Vwap:
         self.running_updater = False
         self.last_stream_tick_ts = 0
         self.counter = 0
+        self.exponent = 15
 
     def init(self):
         self.update_balance()
@@ -551,7 +552,10 @@ class Vwap:
             small_trade_cost_default
         )
 
-        self.d[s]['min_big_trade_cost'] = small_trade_cost * 6
+        self.d[s]['min_big_trade_cost'] = max(
+            small_trade_cost * 6,
+            self.my_trades_analyses[s]['small_big_amount_threshold'] * self.cm.last_price[s] * 1.1
+        )
 
 
         # set ideal orders
@@ -566,7 +570,7 @@ class Vwap:
                 1.0,
                 min(
                     5.0,
-                    (self.cm.last_price[s] / self.my_trades_analyses[s]['shrt_buy_price'])**15
+                    (self.cm.last_price[s] / self.my_trades_analyses[s]['shrt_buy_price'])**self.exponent
                 )
             ) if self.my_trades_analyses[s]['shrt_buy_price'] > 0.0 else 1.0
             shrt_sel_amount = max(0.0, min(
@@ -591,7 +595,7 @@ class Vwap:
                 1.0,
                 min(
                     5.0,
-                    (self.my_trades_analyses[s]['long_sel_price'] / self.cm.last_price[s])**15
+                    (self.my_trades_analyses[s]['long_sel_price'] / self.cm.last_price[s])**self.exponent
                 )
             )
             long_buy_amount = max(0.0, min(
