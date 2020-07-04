@@ -14,6 +14,8 @@ def get_cutoff_index(lst: [dict], age_limit: int) -> int:
 
 def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
     start_quot = 1.0
+    if 'exponent' not in settings:
+        settings['exponent'] = 15
     ppctminus = 1 - settings['profit_pct']
     ppctplus = 1 + settings['profit_pct']
     symbols = [c.replace('_low', '') for c in df.columns if 'low' in c]
