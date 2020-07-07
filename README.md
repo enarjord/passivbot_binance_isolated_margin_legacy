@@ -136,9 +136,18 @@ about the settings:
     "bnb_buffer": 50.3,                         # BNB buffer for paying fees and interest, and for vip status
     "max_memory_span_days": 60,                 # how many days past the bot will take trade history into account
     "snapshot_timestamp_millis": 0,             # timestamp in millis from which bot will take trade history into account
-    "ema_spans_minutes": [58, 70, ... 300, 360] # exponential moving averages used to set max bid and min ask prices
+    "ema_spans_minutes": [15, 25 ... 675, 1080],# exponential moving averages used to set max bid and min ask prices
                                                 # it calculates any number of emas,
                                                 # and sets highest allowed bid = min(emas) and lowest allowed ask = max(emas)
+    "exponent": 15                              # entry volume is modified by the following formula:
+                                                # max_long_entry_vol *= max(1.0, min(5.0, (long_exit_price / current_price)**exponent))
+                                                # max_shrt_entry_vol *= max(1.0, min(5.0, (current_price / shrt_exit_price)**exponent))
+                                                # difference between exit_price and current price of
+                                                # -   2%, will increase entry vol by up to ~34%
+                                                # -   5%, will increase entry vol by up to ~100%
+                                                # -  10%, will increase entry vol by up to ~310%
+                                                # - >11%, will increase entry vol by up to ~400%
+                                                # set exponent = 0 and there will be no entry_vol modification
 
 
 
