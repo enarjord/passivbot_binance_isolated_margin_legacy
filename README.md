@@ -130,11 +130,11 @@ about the settings:
                                                 # volume weighted average price is still 0.00005
                                                 # and short buy price becomes 0.00005 * (1 - 0.0025) == 0.000049875
                                                 #
-    "account_equity_pct_per_trade": 0.0006,     # percentage of total account equity to spend per symbol per trade
-    "account_equity_pct_per_hour": 0.0045,      # percentage of total account equity to spend per symbol per hour
+    "account_equity_pct_per_trade": 0.0001,     # percentage of total account equity to spend per symbol per trade
+    "account_equity_pct_per_hour": 0.000384,    # percentage of total account equity to spend per symbol per hour
     "hours_rolling_small_trade_window": 1.0,    # eg. if (past 1 hour long buy volume) > threshold: don't place long bid
     "bnb_buffer": 50.3,                         # BNB buffer for paying fees and interest, and for vip status
-    "max_memory_span_days": 60,                 # how many days past the bot will take trade history into account
+    "max_memory_span_days": 120,                # how many days past the bot will take trade history into account
     "snapshot_timestamp_millis": 0,             # timestamp in millis from which bot will take trade history into account
     "ema_spans_minutes": [15, 25 ... 675, 1080],# exponential moving averages used to set max bid and min ask prices
                                                 # it calculates any number of emas,
