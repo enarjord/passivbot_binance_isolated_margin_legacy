@@ -14,8 +14,6 @@ def get_cutoff_index(lst: [dict], age_limit: int) -> int:
 
 def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
     start_quot = 1.0
-    if 'exponent' not in settings:
-        settings['exponent'] = 15
     ppctminus = 1 - settings['profit_pct']
     ppctplus = 1 + settings['profit_pct']
     symbols = [c.replace('_low', '') for c in df.columns if 'low' in c]
@@ -73,11 +71,10 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
 
     balance_list = []
 
-    do_long = {s for s in symbols if s2c[s] in settings['coins_long']}
     do_shrt = {s for s in symbols if s2c[s] in settings['coins_shrt']}
-    print(do_long)
-    print(do_shrt)
+    do_long = {s for s in symbols if s2c[s] in settings['coins_long']}
 
+    exponent = settings['entry_vol_modifier_exponent']
 
     start_ts, end_ts = df.index[0], df.index[-1]
     ts_range = end_ts - start_ts
@@ -127,7 +124,8 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                     past_n_hours_long_cost[s] -= sum([e['price'] * e['amount'] for e in slc])
                 # long buy
                 long_modifier = max(
-                    1.0, min(5.0, (exit_ask[s] / getattr(row, means[s]))**settings['exponent']))
+                    1.0, min(settings['min_big_trade_cost_multiplier'] - 1,
+                             (exit_ask[s] / getattr(row, means[s]))**exponent))
                 if acc_equity_quot * account_equity_pct_per_period * long_modifier > \
                         past_n_hours_long_cost[s]:
                     buy_cost = cost * long_modifier
@@ -170,7 +168,8 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                     past_n_hours_shrt_cost[s] -= sum([e['price'] * e['amount'] for e in slc])
                 # shrt sel
                 shrt_modifier = max(
-                    1.0, min(5.0, (getattr(row, means[s]) / exit_bid[s])**settings['exponent']))
+                    1.0, min(settings['min_big_trade_cost_multiplier'] - 1,
+                             (getattr(row, means[s]) / exit_bid[s])**exponent))
                 if acc_equity_quot * account_equity_pct_per_period * shrt_modifier > \
                         past_n_hours_shrt_cost[s]:
                     sel_cost = cost * shrt_modifier
