@@ -73,6 +73,11 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
 
     balance_list = []
 
+    do_long = {s for s in symbols if s2c[s] in settings['coins_long']}
+    do_shrt = {s for s in symbols if s2c[s] in settings['coins_shrt']}
+    print(do_long)
+    print(do_shrt)
+
 
     start_ts, end_ts = df.index[0], df.index[-1]
     ts_range = end_ts - start_ts
@@ -114,7 +119,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                 else:
                     exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
 
-            if getattr(row, lows[s]) < entry_bid[s]:
+            if s in do_long and getattr(row, lows[s]) < entry_bid[s]:
                 li = get_cutoff_index(past_n_hours_long_entries[s], trade_window_age_limit)
                 if li > 0:
                     slc = past_n_hours_long_entries[s][:li]
@@ -157,7 +162,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                         long_amount[s] += buy_amount
                         long_cost[s] += partial_buy_cost
                         exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
-            if getattr(row, highs[s]) > entry_ask[s]:
+            if s in do_shrt and getattr(row, highs[s]) > entry_ask[s]:
                 si = get_cutoff_index(past_n_hours_shrt_entries[s], trade_window_age_limit)
                 if si > 0:
                     slc = past_n_hours_shrt_entries[s][:si]
@@ -366,7 +371,7 @@ def main():
 
     symbols = [f'{c}/BTC' for c in settings['coins_long']]
     symbols = sorted(symbols)
-    n_days = 30 * 12
+    n_days = 30 * 13
     #symbols = [s for s in symbols if not any(s.startswith(c) for c in ['VET', 'IOST'])]
     print('loading ohlcvs')
     high_low_means = load_hlms(symbols, n_days, no_download=True)
@@ -375,8 +380,8 @@ def main():
 
 
     results = []
-    for aepph in list(np.linspace(0.0007, 0.001, 20).round(6)):
-        for mmsd in list(np.linspace(90, 90, 1).round().astype(int)):
+    for aepph in list(np.linspace(0.00037, 0.0005, 20).round(6)):
+        for mmsd in list(np.linspace(120, 120, 1).round().astype(int)):
             print('testing', aepph, mmsd)
             settings['account_equity_pct_per_hour'] = aepph
             settings['max_memory_span_days'] = mmsd
