@@ -558,6 +558,7 @@ class Vwap:
 
 
         # set ideal orders
+        exponent = self.hyperparams['entry_vol_modifier_exponent']
         if s in self.do_shrt_sel:
             shrt_sel_price = max([
                 round_up(self.cm.max_ema[s], self.price_precisions[s]),
@@ -570,7 +571,7 @@ class Vwap:
                 min(
                     self.hyperparams['min_big_trade_cost_multiplier'] - 1,
                     (self.cm.last_price[s] /
-                     self.my_trades_analyses[s]['shrt_buy_price'])**self.hyperparams['exponent']
+                     self.my_trades_analyses[s]['shrt_buy_price'])**exponent
                 )
             ) if self.my_trades_analyses[s]['shrt_buy_price'] > 0.0 else 1.0
             shrt_sel_amount = max(0.0, min(
@@ -596,7 +597,7 @@ class Vwap:
                 min(
                     self.hyperparams['min_big_trade_cost_multiplier'] - 1,
                     (self.my_trades_analyses[s]['long_sel_price'] /
-                     self.cm.last_price[s])**self.hyperparams['exponent']
+                     self.cm.last_price[s])**exponent
                 )
             )
             long_buy_amount = max(0.0, min(
