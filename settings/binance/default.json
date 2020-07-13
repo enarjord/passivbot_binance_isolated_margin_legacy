@@ -62,5 +62,6 @@
     "max_memory_span_days": 120,
     "snapshot_timestamp_millis": 0,
     "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080],
-    "exponent": 15
+    "entry_vol_modifier_exponent": 12,
+    "min_big_trade_cost_multiplier": 10
 }
