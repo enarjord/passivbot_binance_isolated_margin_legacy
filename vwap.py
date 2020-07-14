@@ -13,34 +13,34 @@ class Vwap:
     '''
     runs on margin wallet
     '''
-    def __init__(self, commons, hyperparams: dict):
+    def __init__(self, commons, settings: dict):
         self.cm = commons
         self.cc = commons.cc
-        self.hyperparams = hyperparams
-        self.hyperparams['profit_pct_plus'] = (1 + hyperparams['profit_pct'])
-        self.hyperparams['profit_pct_minus'] = (1 - hyperparams['profit_pct'])
-        self.hyperparams['account_equity_pct_per_period'] = \
-            hyperparams['account_equity_pct_per_hour'] * \
-            hyperparams['hours_rolling_small_trade_window']
-        self.hyperparams['millis_rolling_small_trade_window'] = \
-            hyperparams['hours_rolling_small_trade_window'] * 60 * 60 * 1000
-        self.hyperparams['max_memory_span_millis'] = \
-            hyperparams['max_memory_span_days'] * 1000 * 60 * 60 * 24
-        self.user = hyperparams['user']
-        self.symbols = hyperparams['symbols']
+        self.settings = settings
+        self.settings['profit_pct_plus'] = (1 + settings['profit_pct'])
+        self.settings['profit_pct_minus'] = (1 - settings['profit_pct'])
+        self.settings['account_equity_pct_per_period'] = \
+            settings['account_equity_pct_per_hour'] * \
+            settings['hours_rolling_small_trade_window']
+        self.settings['millis_rolling_small_trade_window'] = \
+            settings['hours_rolling_small_trade_window'] * 60 * 60 * 1000
+        self.settings['max_memory_span_millis'] = \
+            settings['max_memory_span_days'] * 1000 * 60 * 60 * 24
+        self.user = settings['user']
+        self.symbols = settings['symbols']
         self.symbols_set = set(self.symbols)
-        self.coins = hyperparams['coins']
-        self.quot = hyperparams['quot']
+        self.coins = settings['coins']
+        self.quot = settings['quot']
         self.all_coins_set = set(list(self.coins) + [self.quot])
         self.symbol_split = {symbol: symbol.split('/') for symbol in self.symbols}
         self.do_shrt_sel = {symbol for symbol in self.symbols
-                            if self.symbol_split[symbol][0] in hyperparams['coins_shrt']}
+                            if self.symbol_split[symbol][0] in settings['coins_shrt']}
         self.do_long_buy = {symbol for symbol in self.symbols
-                            if self.symbol_split[symbol][0] in hyperparams['coins_long']}
+                            if self.symbol_split[symbol][0] in settings['coins_long']}
         self.do_shrt_buy = {symbol for symbol in self.symbols}
         self.do_long_sel = {symbol for symbol in self.symbols}
         self.do_borrow = {coin for coin in self.all_coins_set
-                          if coin not in hyperparams['do_not_borrow']}
+                          if coin not in settings['do_not_borrow']}
         self.nodash_to_dash_map = {symbol.replace('/', ''): symbol for symbol in self.symbols}
         self.balance = {}
         self.my_trades = {}
@@ -271,7 +271,7 @@ class Vwap:
                         self.time_keepers['update_my_trades'][symbol] = 0
             except(KeyError):
                 pass
-        self.tradable_bnb = max(0.0, new_balance['BNB']['onhand'] - self.hyperparams['bnb_buffer'])
+        self.tradable_bnb = max(0.0, new_balance['BNB']['onhand'] - self.settings['bnb_buffer'])
         self.balance = new_balance
         self.time_keepers['update_balance'] = time()
 
@@ -355,8 +355,8 @@ class Vwap:
         self.time_keepers['update_my_trades'][symbol] = time()
 
     def set_analysis(self, s: str, my_trades: [dict]):
-        age_limit_millis = max(self.cc.milliseconds() - self.hyperparams['max_memory_span_millis'],
-                               self.hyperparams['snapshot_timestamp_millis'])
+        age_limit_millis = max(self.cc.milliseconds() - self.settings['max_memory_span_millis'],
+                               self.settings['snapshot_timestamp_millis'])
         my_trades_cropped, analysis = analyze_my_trades(
             [mt for mt in my_trades if mt['timestamp'] > age_limit_millis]
         )
@@ -364,13 +364,13 @@ class Vwap:
             calc_rolling_cost_vol(my_trades_cropped,
                                   analysis['small_big_amount_threshold'],
                                   (self.cc.milliseconds() -
-                                   self.hyperparams['millis_rolling_small_trade_window']))
+                                   self.settings['millis_rolling_small_trade_window']))
         analysis['long_sel_price'] = round_up(
-            analysis['true_long_vwap'] * self.hyperparams['profit_pct_plus'],
+            analysis['true_long_vwap'] * self.settings['profit_pct_plus'],
             self.price_precisions[s]
         )
         analysis['shrt_buy_price'] = round_dn(
-            analysis['true_shrt_vwap'] * self.hyperparams['profit_pct_minus'],
+            analysis['true_shrt_vwap'] * self.settings['profit_pct_minus'],
             self.price_precisions[s]
         )
         self.my_trades[s] = my_trades_cropped
@@ -545,20 +545,20 @@ class Vwap:
 
         small_trade_cost_default = max(self.min_trade_costs[s],
                                        (self.balance[quot]['account_equity'] *
-                                        self.hyperparams['account_equity_pct_per_trade']))
+                                        self.settings['account_equity_pct_per_trade']))
         small_trade_cost = max(
             10**-self.amount_precisions[s] * self.cm.last_price[s],
             small_trade_cost_default
         )
 
         self.d[s]['min_big_trade_cost'] = max(
-            small_trade_cost * self.hyperparams['min_big_trade_cost_multiplier'],
+            small_trade_cost * self.settings['min_big_trade_cost_multiplier'],
             self.my_trades_analyses[s]['small_big_amount_threshold'] * self.cm.last_price[s] * 1.1
         )
 
 
         # set ideal orders
-        exponent = self.hyperparams['entry_vol_modifier_exponent']
+        exponent = self.settings['entry_vol_modifier_exponent']
         if s in self.do_shrt_sel:
             shrt_sel_price = max([
                 round_up(self.cm.max_ema[s], self.price_precisions[s]),
@@ -569,7 +569,7 @@ class Vwap:
             shrt_amount_modifier = max(
                 1.0,
                 min(
-                    self.hyperparams['min_big_trade_cost_multiplier'] - 1,
+                    self.settings['min_big_trade_cost_multiplier'] - 1,
                     (self.cm.last_price[s] /
                      self.my_trades_analyses[s]['shrt_buy_price'])**exponent
                 )
@@ -577,7 +577,7 @@ class Vwap:
             shrt_sel_amount = max(0.0, min(
                 small_trade_cost * shrt_amount_modifier,
                 (self.balance[quot]['account_equity'] *
-                 self.hyperparams['account_equity_pct_per_period'] * shrt_amount_modifier -
+                 self.settings['account_equity_pct_per_period'] * shrt_amount_modifier -
                  self.my_trades_analyses[s]['shrt_cost_vol'])) / shrt_sel_price)
             self.ideal_shrt_sel[s] = {
                 'side': 'sell',
@@ -595,7 +595,7 @@ class Vwap:
             long_amount_modifier = max(
                 1.0,
                 min(
-                    self.hyperparams['min_big_trade_cost_multiplier'] - 1,
+                    self.settings['min_big_trade_cost_multiplier'] - 1,
                     (self.my_trades_analyses[s]['long_sel_price'] /
                      self.cm.last_price[s])**exponent
                 )
@@ -603,7 +603,7 @@ class Vwap:
             long_buy_amount = max(0.0, min(
                 small_trade_cost * long_amount_modifier,
                 (self.balance[quot]['account_equity'] *
-                 self.hyperparams['account_equity_pct_per_period'] * long_amount_modifier -
+                 self.settings['account_equity_pct_per_period'] * long_amount_modifier -
                  self.my_trades_analyses[s]['long_cost_vol'])) / long_buy_price)
             self.ideal_long_buy[s] = {
                 'side': 'buy',
