@@ -56,13 +56,12 @@
     "do_not_borrow": ["BNB"],
     "profit_pct": 0.0025,
     "account_equity_pct_per_trade": 0.0001,
-    "account_equity_pct_per_hour": 0.000384,
-    "hours_rolling_small_trade_window": 1.0,
     "bnb_buffer": 50.3,
     "max_memory_span_days": 120,
     "snapshot_timestamp_millis": 0,
     "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080],
     "entry_vol_modifier_exponent": 12,
     "min_big_trade_cost_multiplier": 10,
-    "entry_spread": 0.005
+    "entry_spread": 0.005,
+    "min_seconds_between_same_side_entries": 60
 }
