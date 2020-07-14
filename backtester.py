@@ -23,14 +23,12 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
     highs = {s: f'{s}_high' for s in symbols}
     means = {s: f'{s}_mean' for s in symbols}
 
-    account_equity_pct_per_period = settings['account_equity_pct_per_hour'] * \
-        settings['hours_rolling_small_trade_window']
-
     min_emas = {s: f'{s}_mean_min_ema' for s in symbols}
     max_emas = {s: f'{s}_mean_max_ema' for s in symbols}
 
+    min_delay_millis = settings['min_seconds_between_same_side_entries'] * 1000
+
     rolling_millis = settings['max_memory_span_days'] * 24 * 60 * 60 * 1000
-    rolling_trade_window_millis = settings['hours_rolling_small_trade_window'] * 60 * 60 * 1000
 
     s2c = {s: s.split('_')[0] for s in symbols}
     quot = symbols[0].split('_')[1]
@@ -47,12 +45,6 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
 
     past_rolling_long_entries = {s: [] for s in symbols}
     past_rolling_shrt_entries = {s: [] for s in symbols}
-
-    past_n_hours_long_entries = {s: [] for s in symbols}
-    past_n_hours_shrt_entries = {s: [] for s in symbols}
-    past_n_hours_long_cost = {s: 0.0 for s in symbols}
-    past_n_hours_shrt_cost = {s: 0.0 for s in symbols}
-
 
     entry_bid = {s: round(df.iloc[0][means[s]], 8) for s in symbols}
     entry_ask = {s: round(df.iloc[0][means[s]], 8) for s in symbols}
@@ -81,10 +73,9 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
 
     for row in df.itertuples():
         cost = acc_equity_quot * settings['account_equity_pct_per_trade']
-        min_exit_cost = cost * 6
+        min_exit_cost = cost * settings['min_big_trade_cost_multiplier']
         credit_avbl_quot = max(0.0, acc_equity_quot * margin_level - acc_debt_quot)
         age_limit = row.Index - rolling_millis
-        trade_window_age_limit = row.Index - rolling_trade_window_millis
         for s in symbols:
             # rolling longs
             long_i = get_cutoff_index(past_rolling_long_entries[s], age_limit)
@@ -116,96 +107,77 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                 else:
                     exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
 
-            if s in do_long and getattr(row, lows[s]) < entry_bid[s]:
-                li = get_cutoff_index(past_n_hours_long_entries[s], trade_window_age_limit)
-                if li > 0:
-                    slc = past_n_hours_long_entries[s][:li]
-                    past_n_hours_long_entries[s] = past_n_hours_long_entries[s][li:]
-                    past_n_hours_long_cost[s] -= sum([e['price'] * e['amount'] for e in slc])
+            if s in do_long and getattr(row, lows[s]) < entry_bid[s] and \
+                    (not long_entries[s] or
+                     (row.Index - long_entries[s][-1]['timestamp'] >= min_delay_millis)):
                 # long buy
                 long_modifier = max(
                     1.0, min(settings['min_big_trade_cost_multiplier'] - 1,
                              (exit_ask[s] / getattr(row, means[s]))**exponent))
-                if acc_equity_quot * account_equity_pct_per_period * long_modifier > \
-                        past_n_hours_long_cost[s]:
-                    buy_cost = cost * long_modifier
-                    if balance[quot] >= buy_cost:
-                        # long buy normal
-                        buy_amount = (buy_cost / entry_bid[s])
-                        balance[quot] -= buy_cost
-                        balance[s2c[s]] += buy_amount * fee
-                        long_entries[s].append({'price': entry_bid[s], 'amount': buy_amount,
-                                                'timestamp': row.Index})
-                        past_rolling_long_entries[s].append(long_entries[s][-1])
-                        past_n_hours_long_entries[s].append(long_entries[s][-1])
-                        past_n_hours_long_cost[s] += buy_cost
-                        long_amount[s] += buy_amount
-                        long_cost[s] += buy_cost
-                        exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
-                    elif credit_avbl_quot > 0.0:
-                        # long buy with credit
-                        quot_avbl = max(0.0, balance[quot])
-                        to_borrow = min(credit_avbl_quot, buy_cost - quot_avbl)
-                        credit_avbl_quot -= to_borrow
-                        partial_buy_cost = quot_avbl + to_borrow
-                        buy_amount = (partial_buy_cost / entry_bid[s])
-                        balance[quot] -= partial_buy_cost
-                        balance[s2c[s]] += buy_amount * fee
-                        long_entries[s].append({'price': entry_bid[s], 'amount': buy_amount,
-                            'timestamp': row.Index})
-                        past_rolling_long_entries[s].append(long_entries[s][-1])
-                        past_n_hours_long_entries[s].append(long_entries[s][-1])
-                        past_n_hours_long_cost[s] += (long_entries[s][-1]['price'] *
-                                                      long_entries[s][-1]['amount'])
-                        long_amount[s] += buy_amount
-                        long_cost[s] += partial_buy_cost
-                        exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
-            if s in do_shrt and getattr(row, highs[s]) > entry_ask[s]:
-                si = get_cutoff_index(past_n_hours_shrt_entries[s], trade_window_age_limit)
-                if si > 0:
-                    slc = past_n_hours_shrt_entries[s][:si]
-                    past_n_hours_shrt_entries[s] = past_n_hours_shrt_entries[s][si:]
-                    past_n_hours_shrt_cost[s] -= sum([e['price'] * e['amount'] for e in slc])
+                buy_cost = cost * long_modifier
+                if balance[quot] >= buy_cost:
+                    # long buy normal
+                    buy_amount = (buy_cost / entry_bid[s])
+                    balance[quot] -= buy_cost
+                    balance[s2c[s]] += buy_amount * fee
+                    long_entries[s].append({'price': entry_bid[s], 'amount': buy_amount,
+                                            'timestamp': row.Index})
+                    past_rolling_long_entries[s].append(long_entries[s][-1])
+                    long_amount[s] += buy_amount
+                    long_cost[s] += buy_cost
+                    exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
+                elif credit_avbl_quot > 0.0:
+                    # long buy with credit
+                    quot_avbl = max(0.0, balance[quot])
+                    to_borrow = min(credit_avbl_quot, buy_cost - quot_avbl)
+                    credit_avbl_quot -= to_borrow
+                    partial_buy_cost = quot_avbl + to_borrow
+                    buy_amount = (partial_buy_cost / entry_bid[s])
+                    balance[quot] -= partial_buy_cost
+                    balance[s2c[s]] += buy_amount * fee
+                    long_entries[s].append({'price': entry_bid[s], 'amount': buy_amount,
+                        'timestamp': row.Index})
+                    past_rolling_long_entries[s].append(long_entries[s][-1])
+                    long_amount[s] += buy_amount
+                    long_cost[s] += partial_buy_cost
+                    exit_ask[s] = (long_cost[s] / long_amount[s]) * ppctplus
+            if s in do_shrt and getattr(row, highs[s]) > entry_ask[s] and \
+                    (not shrt_entries[s] or
+                     (row.Index - shrt_entries[s][-1]['timestamp'] >= min_delay_millis)):
                 # shrt sel
                 shrt_modifier = max(
                     1.0, min(settings['min_big_trade_cost_multiplier'] - 1,
                              (getattr(row, means[s]) / exit_bid[s])**exponent))
-                if acc_equity_quot * account_equity_pct_per_period * shrt_modifier > \
-                        past_n_hours_shrt_cost[s]:
-                    sel_cost = cost * shrt_modifier
-                    sel_amount = sel_cost / entry_ask[s]
-                    if balance[s2c[s]] >= sel_amount:
-                        # shrt sel normal
-                        balance[s2c[s]] -= sel_amount
-                        balance[quot] += sel_cost * fee
-                        shrt_entries[s].append({'price': entry_ask[s], 'amount': sel_amount,
-                                                'timestamp': row.Index})
-                        past_rolling_shrt_entries[s].append(shrt_entries[s][-1])
-                        past_n_hours_shrt_entries[s].append(shrt_entries[s][-1])
-                        past_n_hours_shrt_cost[s] += sel_cost
-                        shrt_amount[s] += sel_amount
-                        shrt_cost[s] += sel_cost
-                        exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
-                    elif credit_avbl_quot > 0.0:
-                        # shrt sel with credit
-                        coin_avbl = max(0.0, balance[s2c[s]])
-                        to_borrow = min(credit_avbl_quot / entry_ask[s], sel_amount - coin_avbl)
-                        credit_avbl_quot -= (to_borrow * entry_ask[s])
-                        partial_sel_amount = coin_avbl + to_borrow
-                        balance[s2c[s]] -= partial_sel_amount
-                        partial_sel_cost = partial_sel_amount * entry_ask[s]
-                        balance[quot] += partial_sel_cost * fee
-                        shrt_entries[s].append({'price': entry_ask[s], 'amount': partial_sel_amount,
-                                                'timestamp': row.Index})
-                        past_rolling_shrt_entries[s].append(shrt_entries[s][-1])
-                        past_n_hours_shrt_entries[s].append(shrt_entries[s][-1])
-                        past_n_hours_shrt_cost[s] += partial_sel_cost
-                        shrt_amount[s] += partial_sel_amount
-                        shrt_cost[s] += partial_sel_cost
-                        exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
+                sel_cost = cost * shrt_modifier
+                sel_amount = sel_cost / entry_ask[s]
+                if balance[s2c[s]] >= sel_amount:
+                    # shrt sel normal
+                    balance[s2c[s]] -= sel_amount
+                    balance[quot] += sel_cost * fee
+                    shrt_entries[s].append({'price': entry_ask[s], 'amount': sel_amount,
+                                            'timestamp': row.Index})
+                    past_rolling_shrt_entries[s].append(shrt_entries[s][-1])
+                    shrt_amount[s] += sel_amount
+                    shrt_cost[s] += sel_cost
+                    exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
+                elif credit_avbl_quot > 0.0:
+                    # shrt sel with credit
+                    coin_avbl = max(0.0, balance[s2c[s]])
+                    to_borrow = min(credit_avbl_quot / entry_ask[s], sel_amount - coin_avbl)
+                    credit_avbl_quot -= (to_borrow * entry_ask[s])
+                    partial_sel_amount = coin_avbl + to_borrow
+                    balance[s2c[s]] -= partial_sel_amount
+                    partial_sel_cost = partial_sel_amount * entry_ask[s]
+                    balance[quot] += partial_sel_cost * fee
+                    shrt_entries[s].append({'price': entry_ask[s], 'amount': partial_sel_amount,
+                                            'timestamp': row.Index})
+                    past_rolling_shrt_entries[s].append(shrt_entries[s][-1])
+                    shrt_amount[s] += partial_sel_amount
+                    shrt_cost[s] += partial_sel_cost
+                    exit_bid[s] = (shrt_cost[s] / shrt_amount[s]) * ppctminus
 
-            exit_ask[s] = round_up(max(exit_ask[s], entry_ask[s]), price_precisions[s])
-            exit_bid[s] = round_dn(min(exit_bid[s], entry_bid[s]), price_precisions[s])
+            exit_ask[s] = round_up(exit_ask[s], price_precisions[s])
+            exit_bid[s] = round_dn(exit_bid[s], price_precisions[s])
 
             if long_cost[s] > min_exit_cost:
                 # long sel
@@ -240,8 +212,6 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                         long_amount[s] = 0.0
                         long_cost[s] = 0.0
                         past_rolling_long_entries[s] = []
-                        past_n_hours_long_entries[s] = []
-                        past_n_hours_long_cost[s] = 0.0
             if shrt_cost[s] > min_exit_cost:
                 shrt_exit_price_list[s].append({'price': exit_bid[s], 'timestamp': row.Index})
                 if getattr(row, lows[s]) < exit_bid[s]:
@@ -276,8 +246,6 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
                         shrt_amount[s] = 0.0
                         shrt_cost[s] = 0.0
                         past_rolling_shrt_entries[s] = []
-                        past_n_hours_shrt_entries[s] = []
-                        past_n_hours_shrt_cost[s] = 0.0
 
             entry_bid[s] = round_dn(
                 min(getattr(row, means[s]), getattr(row, min_emas[s])), price_precisions[s])
@@ -297,6 +265,7 @@ def backtest(df: pd.DataFrame, settings: dict, price_precisions: dict = {}):
             line += f'acc equity quot: {acc_equity_quot:.6f}  '
             n_days = n_millis / 1000 / 60 / 60 / 24
             line += f'avg daily gain: {acc_equity_quot**(1/n_days):6f} '
+            line += f'cost {cost:.8f} '
             sys.stdout.write(line)
             sys.stdout.flush()
     return balance_list, long_entries, shrt_entries, long_exits, shrt_exits, \
@@ -315,17 +284,20 @@ def load_hlms(symbols: [str], n_days: int, no_download: bool = False) -> pd.Data
     return pd.concat(hlms, axis=1).round(10)
 
 
-def add_emas(hlms: pd.DataFrame, ema_spans):
+def add_emas(hlms: pd.DataFrame, ema_spans, spread: float = 0.0):
     min_maxs = []
+    spread_plus = 1 + spread / 2
+    spread_minus = 1 - spread / 2
     for c in filter(lambda x: 'mean' in x, hlms.columns):
+        print(c)
         emas = []
         for span in ema_spans:
             ema = hlms[c].ewm(span=span, adjust=False).mean()
             ema.name = str(span)
             emas.append(ema)
-        minema = pd.concat(emas, axis=1).min(axis=1)
+        minema = pd.concat(emas, axis=1).min(axis=1) * spread_minus
         minema.name = f'{c}_min_ema'
-        maxema = pd.concat(emas, axis=1).max(axis=1)
+        maxema = pd.concat(emas, axis=1).max(axis=1) * spread_plus
         maxema.name = f'{c}_max_ema'
         min_maxs.append(pd.concat([minema, maxema], axis=1))
     df = hlms.join(pd.concat(min_maxs, axis=1))
