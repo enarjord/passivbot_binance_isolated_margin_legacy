@@ -26,6 +26,8 @@ class Vwap:
             settings['hours_rolling_small_trade_window'] * 60 * 60 * 1000
         self.settings['max_memory_span_millis'] = \
             settings['max_memory_span_days'] * 1000 * 60 * 60 * 24
+        self.settings['entry_spread_plus'] = 1 + settings['entry_spread'] / 2
+        self.settings['entry_spread_minus'] = 1 - settings['entry_spread'] / 2
         self.user = settings['user']
         self.symbols = settings['symbols']
         self.symbols_set = set(self.symbols)
@@ -64,6 +66,7 @@ class Vwap:
         self.d = {k: {} for k in set(self.symbols + list(self.all_coins_set))}
         self.eligible_entries = []
         self.eligible_exits = []
+        self.liquidation_orders = {}
         self.prev_execution_ts = 0
         self.prev_loan_ts = {c_: 0 for c_ in sorted(self.all_coins_set) + ['all']}
         self.prev_repay_ts = {c_: 0 for c_ in self.all_coins_set}
@@ -236,8 +239,6 @@ class Vwap:
         borrowable_quot = self.fetch_borrowable(self.quot)
         for e in fetched['userAssets']:
             c = e['asset']
-            if c not in self.all_coins_set:
-                continue
             new_balance[c] = {
                 'free': float(e['free']),
                 'used': float(e['locked']),
@@ -245,13 +246,19 @@ class Vwap:
                 'interest': float(e['interest']),
                 'equity': float(e['netAsset']),
                 'free': float(e['free']),
-                'borrowable': (self.cm.convert_amount(borrowable_quot, self.quot, c)
-                               if c in self.do_borrow else 0.0),
             }
+
             new_balance[c]['onhand'] = new_balance[c]['free'] + new_balance[c]['used']
             new_balance[c]['debt'] = new_balance[c]['interest'] + new_balance[c]['borrowed']
+            if c not in self.all_coins_set:
+                new_balance[c]['liquidate'] = True
+                continue
+            else:
+                new_balance[c]['liquidate'] = False
             onhand_sum_quot += self.cm.convert_amount(new_balance[c]['onhand'], c, self.quot)
             debt_sum_quot += self.cm.convert_amount(new_balance[c]['debt'], c, self.quot)
+            new_balance[c]['borrowable'] = (self.cm.convert_amount(borrowable_quot, self.quot, c)
+                                            if c in self.do_borrow else 0.0)
         for c in self.all_coins_set:
             if c not in new_balance:
                 new_balance[c] = {key: 0.0 for key in ['free', 'used', 'borrowed', 'interest',
@@ -561,7 +568,8 @@ class Vwap:
         exponent = self.settings['entry_vol_modifier_exponent']
         if s in self.do_shrt_sel:
             shrt_sel_price = max([
-                round_up(self.cm.max_ema[s], self.price_precisions[s]),
+                round_up(self.cm.max_ema[s] * self.settings['entry_spread_plus'],
+                         self.price_precisions[s]),
                 other_bid_incr,
                 (other_ask_decr if small_trade_cost / other_ask_decr < lowest_other_ask['amount']
                  else lowest_other_ask['price'])
@@ -587,7 +595,8 @@ class Vwap:
             }
         if s in self.do_long_buy:
             long_buy_price = min([
-                round_dn(self.cm.min_ema[s], self.price_precisions[s]),
+                round_dn(self.cm.min_ema[s] * self.settings['entry_spread_minus'],
+                         self.price_precisions[s]),
                 other_ask_decr,
                 (other_bid_incr if small_trade_cost / other_bid_incr < highest_other_bid['amount']
                  else highest_other_bid['price'])
@@ -612,21 +621,74 @@ class Vwap:
                 'price': long_buy_price
             }
         if s in self.do_shrt_buy:
+            shrt_buy_amount = round_up(self.my_trades_analyses[s]['true_shrt_amount'],
+                                       self.amount_precisions[s])
             self.ideal_shrt_buy[s] = {
                 'side': 'buy',
-                'amount': round_up(self.my_trades_analyses[s]['true_shrt_amount'],
-                                   self.amount_precisions[s]),
-                'price': min(self.my_trades_analyses[s]['shrt_buy_price'],
-                             self.ideal_long_buy[s]['price'])
+                'amount': shrt_buy_amount,
+                'price': min([round_dn(self.cm.min_ema[s], self.price_precisions[s]),
+                              other_ask_decr,
+                              (other_bid_incr if shrt_buy_amount < highest_other_bid['amount']
+                               else highest_other_bid['price']),
+                              self.my_trades_analyses[s]['shrt_buy_price']])
             }
         if s in self.do_long_sel:
+            long_sel_amount = round_up(self.my_trades_analyses[s]['true_long_amount'],
+                                       self.amount_precisions[s])
             self.ideal_long_sel[s] = {
                 'side': 'sell',
-                'amount': round_up(self.my_trades_analyses[s]['true_long_amount'],
-                                   self.amount_precisions[s]),
-                'price': max(self.my_trades_analyses[s]['long_sel_price'],
-                             self.ideal_shrt_sel[s]['price'])
+                'amount': long_sel_amount,
+                'price': max([round_up(self.cm.max_ema[s], self.price_precisions[s]),
+                              other_bid_incr,
+                              (other_ask_decr if long_sel_amount < lowest_other_ask['amount']
+                               else lowest_other_ask['price']),
+                              self.my_trades_analyses[s]['long_sel_price']])
             }
+
+    def set_liquidation_order(self, s: str):
+        '''
+        run async
+        '''
+        coin, quot = self.symbol_split[s]
+        ticker = self.cc.fetch_ticker(s)
+        ohlcv = self.cc.fetch_ohlcv(s, limit=1000)
+        self.cm.init_ema(s)
+        small_trade_cost = max(self.min_trade_costs[s],
+                               (self.balance[quot]['account_equity'] *
+                                self.settings['account_equity_pct_per_trade']))
+        bid_price = round_dn(min(ticker['bid'], self.cm.min_ema[s]), self.price_precisions[s])
+        ask_price = round_up(max(ticker['ask'], self.cm.max_ema[s]), self.price_precisions[s])
+
+        bid_amount = round_up(small_trade_cost / bid_price, self.amount_precisions[s])
+        ask_amount = round_up(small_trade_cost / ask_price, self.amount_precisions[s])
+        if quot == self.quot:
+            if self.balance[coin]['debt'] > 0.0:
+                if self.balance[coin]['debt'] >= self.balance[coin]['onhand']:
+                    repay_amount = self.balance[coin]['onhand']
+                    ask_amount = 0.0
+                else:
+                    repay_amount = self.balance[coin]['debt']
+                    bid_amount = 0.0
+                    if self.balance[coin]['onhand'] - self.balance[coin]['debt'] < \
+                            self.min_trade_costs[s] / ask_price:
+                        ask_amount = 0.0
+            else:
+                repay_amount = 0.0
+                bid_amount = 0.0
+                if self.balance[coin]['onhand'] < self.min_trade_costs[s] / ask_price:
+                    ask_amount = 0.0
+        elif coin == self.quot:
+            pass
+        self.liquidation_orders[s] = []
+        if bid_price and bid_amount:
+            self.liquidation_orders[s].append(
+                {'symbol': s, 'side': 'buy', 'amount': bid_amount, 'price': bid_price})
+        if ask_price and ask_amount:
+            self.liquidation_orders[s].append(
+                {'symbol': s, 'side': 'sell', 'amount': ask_amount, 'price': ask_price})
+        if repay_amount:
+            self.liquidation_orders[s].append(
+                {'symbol': s, 'side': 'repay', 'amount': repay_amount})
 
     def allocate_credit(self):
         # allocate credit and select eligible orders
