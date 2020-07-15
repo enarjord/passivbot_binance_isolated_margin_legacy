@@ -1,5 +1,5 @@
 # passivbot
-trading bot running on binance margin
+trading bot running on binance cross margin
 
 
 requires python >= 3.8
