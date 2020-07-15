@@ -577,9 +577,10 @@ class Vwap:
             ) if self.my_trades_analyses[s]['shrt_buy_price'] > 0.0 else 1.0
             if now_millis - self.my_trades_analyses[s]['shrt_end_ts'] > \
                     self.settings['entry_delay_millis']:
-                shrt_sel_amount = small_trade_cost * shrt_amount_modifier
+                shrt_sel_amount = small_trade_cost * shrt_amount_modifier / shrt_sel_price
             else:
                 shrt_sel_amount = 0.0
+            print(s, shrt_sel_amount)
             self.ideal_shrt_sel[s] = {
                 'side': 'sell',
                 'amount': (ssar if (ssar := round_up(shrt_sel_amount, self.amount_precisions[s])) *
@@ -604,7 +605,7 @@ class Vwap:
             )
             if now_millis - self.my_trades_analyses[s]['long_end_ts'] > \
                     self.settings['entry_delay_millis']:
-                long_buy_amount = small_trade_cost * long_amount_modifier
+                long_buy_amount = small_trade_cost * long_amount_modifier / long_buy_price
             else:
                 long_buy_amount = 0.0
             self.ideal_long_buy[s] = {
