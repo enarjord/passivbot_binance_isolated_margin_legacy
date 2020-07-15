@@ -580,7 +580,6 @@ class Vwap:
                 shrt_sel_amount = small_trade_cost * shrt_amount_modifier / shrt_sel_price
             else:
                 shrt_sel_amount = 0.0
-            print(s, shrt_sel_amount)
             self.ideal_shrt_sel[s] = {
                 'side': 'sell',
                 'amount': (ssar if (ssar := round_up(shrt_sel_amount, self.amount_precisions[s])) *
