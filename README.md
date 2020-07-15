@@ -131,15 +131,13 @@ about the settings:
                                                 # and short buy price becomes 0.00005 * (1 - 0.0025) == 0.000049875
                                                 #
     "account_equity_pct_per_trade": 0.0001,     # percentage of total account equity to spend per symbol per trade
-    "account_equity_pct_per_hour": 0.000384,    # percentage of total account equity to spend per symbol per hour
-    "hours_rolling_small_trade_window": 1.0,    # eg. if (past 1 hour long buy volume) > threshold: don't place long bid
     "bnb_buffer": 50.3,                         # BNB buffer for paying fees and interest, and for vip status
     "max_memory_span_days": 120,                # how many days past the bot will take trade history into account
     "snapshot_timestamp_millis": 0,             # timestamp in millis from which bot will take trade history into account
     "ema_spans_minutes": [15, 25 ... 675, 1080],# exponential moving averages used to set max bid and min ask prices
                                                 # it calculates any number of emas,
                                                 # and sets highest allowed bid = min(emas) and lowest allowed ask = max(emas)
-    "exponent": 15                              # entry volume is modified by the following formula:
+    "entry_vol_modifier_exponent": 12,          # entry volume is modified by the following formula:
                                                 # max_long_entry_vol *= max(1.0, min(5.0, (long_exit_price / current_price)**exponent))
                                                 # max_shrt_entry_vol *= max(1.0, min(5.0, (current_price / shrt_exit_price)**exponent))
                                                 # difference between exit_price and current price of
@@ -148,6 +146,12 @@ about the settings:
                                                 # -  10%, will increase entry vol by up to ~310%
                                                 # - >11%, will increase entry vol by up to ~400%
                                                 # set exponent = 0 and there will be no entry_vol modification
+    "min_big_trade_cost_multiplier": 10,        # the exits are at least 10 times larger than the entries
+                                                # the entry size can be up to (10 - 1) times larger,
+                                                # modified by distance between exit price and current price
+    "entry_spread": 0.005,                      # max_bid_price = min(emas) * (1 - entry_spread / 2)
+                                                # min_ask_price = max(emas) * (1 + entry_spread / 2)
+    "min_seconds_between_same_side_entries": 60 # min seconds between same side entries
 
 
 
@@ -176,15 +180,6 @@ one short entry: small ask
 one short exit: big bid
 
 it will automatically analyze past trades and make appropriate long and short exits
-
-each market pair's volume is throttled by the rolling past 1 hour (default settings) same side volume:
-
-if (past 1 hour long buy volume) > threshold: don't place long bid
-
-if (past 1 hour short sell volume) > threshold: don't place short ask
-
-
-if an exit is taken, will reset the correspondig side's timer
 
 -------------------------------------------------------------------------
 
