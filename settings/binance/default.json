@@ -62,6 +62,6 @@
     "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080],
     "entry_vol_modifier_exponent": 12,
     "min_big_trade_cost_multiplier": 10,
-    "entry_spread": 0.005,
+    "entry_spread": 0.002,
     "min_seconds_between_same_side_entries": 60
 }
