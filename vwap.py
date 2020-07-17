@@ -832,9 +832,9 @@ class Vwap:
         self.counter += 1
         self.try_wrapper(self.allocate_credit)
         self.prev_execution_ts = time()
-        if any([self.time_keepers['update_my_trades'][s] < 11 for s in self.symbols]) or \
-                any([self.time_keepers['update_open_orders'][s] < 11 for s in self.symbols]) or \
-                self.time_keepers['update_balance'] < 11:
+        tss = flatten([[self.time_keepers['update_' + k][s] for k in ['my_trades', 'open_orders']]
+                       for s in self.symbols]) + [self.time_keepers['update_balance']]
+        if any([ts < 11 for ts in tss]):
             return # don't execute if any unfinished updates of my_trades, open_orders or balance
 
         if self.future_handling_lock.locked():
