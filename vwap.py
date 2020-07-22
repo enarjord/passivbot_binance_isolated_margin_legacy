@@ -361,8 +361,13 @@ class Vwap:
     def set_analysis(self, s: str, my_trades: [dict]):
         age_limit_millis = max(self.cc.milliseconds() - self.settings['max_memory_span_millis'],
                                self.settings['snapshot_timestamp_millis'])
+        entry_exit_amount_threshold = calc_entry_exit_threshold_amount(
+            my_trades,
+            m=self.settings['min_exit_cost_multiplier'] - 1
+        )
         my_trades_cropped, analysis = analyze_my_trades(
-            [mt for mt in my_trades if mt['timestamp'] > age_limit_millis]
+            [mt for mt in my_trades if mt['timestamp'] > age_limit_millis],
+            entry_exit_amount_threshold
         )
         analysis['long_sel_price'] = round_up(
             analysis['true_long_vwap'] * self.settings['profit_pct_plus'],
@@ -542,20 +547,17 @@ class Vwap:
         other_ask_decr = round(lowest_other_ask['price'] - 10**-self.price_precisions[s],
                                self.price_precisions[s])
 
-        small_trade_cost_default = max(self.min_trade_costs[s],
-                                       (self.balance[quot]['account_equity'] *
-                                        self.settings['account_equity_pct_per_trade']))
-        small_trade_cost = max(
-            10**-self.amount_precisions[s] * self.cm.last_price[s],
-            small_trade_cost_default
-        )
+        entry_cost_default = max(self.min_trade_costs[s],
+                                 (self.balance[quot]['account_equity'] *
+                                  self.settings['account_equity_pct_per_trade']))
+        entry_cost = max(10**-self.amount_precisions[s] * self.cm.last_price[s], entry_cost_default)
 
-        self.d[s]['min_big_trade_cost'] = max(
-            small_trade_cost * self.settings['min_big_trade_cost_multiplier'],
-            self.my_trades_analyses[s]['small_big_amount_threshold'] * self.cm.last_price[s] * 1.1
+        self.d[s]['min_exit_cost'] = max(
+            entry_cost * self.settings['min_exit_cost_multiplier'],
+            self.my_trades_analyses[s]['entry_exit_amount_threshold'] * self.cm.last_price[s] * 1.1
         )
         entry_delay_millis = \
-            (60 * 60 * 1000) / (self.max_cost_per_symbol_per_hour / small_trade_cost)
+            (60 * 60 * 1000) / (self.max_cost_per_symbol_per_hour / entry_cost)
 
         # set ideal orders
         exponent = self.settings['entry_vol_modifier_exponent']
@@ -565,19 +567,19 @@ class Vwap:
                 round_up(self.cm.max_ema[s] * self.settings['entry_spread_plus'],
                          self.price_precisions[s]),
                 other_bid_incr,
-                (other_ask_decr if small_trade_cost / other_ask_decr < lowest_other_ask['amount']
+                (other_ask_decr if entry_cost / other_ask_decr < lowest_other_ask['amount']
                  else lowest_other_ask['price'])
             ])
             shrt_amount_modifier = max(
                 1.0,
                 min(
-                    self.settings['min_big_trade_cost_multiplier'] - 1,
+                    self.settings['min_exit_cost_multiplier'] - 1,
                     (self.cm.last_price[s] /
                      self.my_trades_analyses[s]['shrt_buy_price'])**exponent
                 )
             ) if self.my_trades_analyses[s]['shrt_buy_price'] > 0.0 else 1.0
             if now_millis - self.my_trades_analyses[s]['last_shrt_entry_ts'] > entry_delay_millis:
-                shrt_sel_amount = small_trade_cost * shrt_amount_modifier / shrt_sel_price
+                shrt_sel_amount = entry_cost * shrt_amount_modifier / shrt_sel_price
             else:
                 shrt_sel_amount = 0.0
             self.ideal_shrt_sel[s] = {
@@ -591,19 +593,19 @@ class Vwap:
                 round_dn(self.cm.min_ema[s] * self.settings['entry_spread_minus'],
                          self.price_precisions[s]),
                 other_ask_decr,
-                (other_bid_incr if small_trade_cost / other_bid_incr < highest_other_bid['amount']
+                (other_bid_incr if entry_cost / other_bid_incr < highest_other_bid['amount']
                  else highest_other_bid['price'])
             ])
             long_amount_modifier = max(
                 1.0,
                 min(
-                    self.settings['min_big_trade_cost_multiplier'] - 1,
+                    self.settings['min_exit_cost_multiplier'] - 1,
                     (self.my_trades_analyses[s]['long_sel_price'] /
                      self.cm.last_price[s])**exponent
                 )
             )
             if now_millis - self.my_trades_analyses[s]['last_long_entry_ts'] > entry_delay_millis:
-                long_buy_amount = small_trade_cost * long_amount_modifier / long_buy_price
+                long_buy_amount = entry_cost * long_amount_modifier / long_buy_price
             else:
                 long_buy_amount = 0.0
             self.ideal_long_buy[s] = {
@@ -645,14 +647,14 @@ class Vwap:
         ticker = self.cc.fetch_ticker(s)
         ohlcv = self.cc.fetch_ohlcv(s, limit=1000)
         self.cm.init_ema(s)
-        small_trade_cost = max(self.min_trade_costs[s],
-                               (self.balance[quot]['account_equity'] *
-                                self.settings['account_equity_pct_per_trade']))
+        entry_cost = max(self.min_trade_costs[s],
+                         (self.balance[quot]['account_equity'] *
+                          self.settings['account_equity_pct_per_trade']))
         bid_price = round_dn(min(ticker['bid'], self.cm.min_ema[s]), self.price_precisions[s])
         ask_price = round_up(max(ticker['ask'], self.cm.max_ema[s]), self.price_precisions[s])
 
-        bid_amount = round_up(small_trade_cost / bid_price, self.amount_precisions[s])
-        ask_amount = round_up(small_trade_cost / ask_price, self.amount_precisions[s])
+        bid_amount = round_up(entry_cost / bid_price, self.amount_precisions[s])
+        ask_amount = round_up(entry_cost / ask_price, self.amount_precisions[s])
         if quot == self.quot:
             if self.balance[coin]['debt'] > 0.0:
                 if self.balance[coin]['debt'] >= self.balance[coin]['onhand']:
@@ -737,13 +739,13 @@ class Vwap:
                  'lp_diff': (self.cm.last_price[s_] / self.ideal_shrt_buy[s_]['price'])},
               **self.ideal_shrt_buy[s_]} for s_ in self.ideal_shrt_buy
              if (self.ideal_shrt_buy[s_]['amount'] *
-                 self.ideal_shrt_buy[s_]['price']) > self.d[s_]['min_big_trade_cost']]
+                 self.ideal_shrt_buy[s_]['price']) > self.d[s_]['min_exit_cost']]
         long_sels = \
             [{**{'symbol': s_,
                  'lp_diff': (self.ideal_long_sel[s_]['price'] / self.cm.last_price[s_])},
               **self.ideal_long_sel[s_]} for s_ in self.ideal_long_sel
              if (self.ideal_long_sel[s_]['amount'] *
-                 self.ideal_long_sel[s_]['price']) > self.d[s_]['min_big_trade_cost']]
+                 self.ideal_long_sel[s_]['price']) > self.d[s_]['min_exit_cost']]
         exits = sorted(long_sels + shrt_buys, key=lambda x: x['lp_diff'])
         eligible_exits = []
         for exit in exits:
@@ -758,7 +760,7 @@ class Vwap:
                         # we do partial exit
                         partial_exit_cost = \
                             credit_available_quot + coin_available[c_] * exit['price']
-                        if partial_exit_cost >= self.d[s_]['min_big_trade_cost']:
+                        if partial_exit_cost > self.d[s_]['min_exit_cost']:
                             exit['partial_amount'] = round_dn(
                                 partial_exit_cost / exit['price'],
                                 self.amount_precisions[s_])
@@ -785,7 +787,7 @@ class Vwap:
                     if credit_available_quot < diff:
                         # we do partial exit
                         partial_exit_cost = coin_available[q_] + credit_available_quot
-                        if partial_exit_cost >= self.d[s_]['min_big_trade_cost']:
+                        if partial_exit_cost > self.d[s_]['min_exit_cost']:
                             exit['partial_amount'] = round_dn(
                                 (coin_available[q_] + credit_available_quot) / exit['price'],
                                 self.amount_precisions[s_]
@@ -1047,15 +1049,13 @@ class Vwap:
 ####################################################################################################
 
 
-def calc_small_big_threshold_amount(my_trades: [dict], cutoff: float = 0.83333, m: float = 2.1):
+def calc_entry_exit_threshold_amount(my_trades: [dict], cutoff: float = 0.83333, m: float = 2.1):
     if len(my_trades) < 10:
         return 9e9
     return sorted((amts := [e['amount'] for e in my_trades]))[:int(len(amts) * cutoff)][-1] * m
 
 
-def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
-
-    small_big_amount_threshold = calc_small_big_threshold_amount(my_trades)
+def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> ([dict], dict):
 
     long_cost, long_amount = 0.0, 0.0
     shrt_cost, shrt_amount = 0.0, 0.0
@@ -1065,7 +1065,7 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
 
     for mt in my_trades:
         if mt['side'] == 'buy':
-            if mt['amount'] < small_big_amount_threshold:
+            if mt['amount'] < entry_exit_amount_threshold:
                 # long buy
                 long_amount += mt['amount']
                 long_cost += mt['cost']
@@ -1079,7 +1079,7 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
                     shrt_amount = 0.0
                     shrt_cost = 0.0
         else:
-            if mt['amount'] < small_big_amount_threshold:
+            if mt['amount'] < entry_exit_amount_threshold:
                 # shrt sel
                 shrt_amount += mt['amount']
                 shrt_cost += mt['cost']
@@ -1103,7 +1103,7 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
                 'shrt_start_ts': shrt_start_ts,
                 'last_long_entry_ts': last_long_entry_ts,
                 'last_shrt_entry_ts': last_shrt_entry_ts,
-                'small_big_amount_threshold': small_big_amount_threshold}
+                'entry_exit_amount_threshold': entry_exit_amount_threshold}
 
     start_ts = min(long_start_ts, shrt_start_ts) - 1000 * 60 * 60 * 24
     _, cropped_my_trades = partition_sorted(my_trades, lambda x: x['timestamp'] >= start_ts)
