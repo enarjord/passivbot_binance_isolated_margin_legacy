@@ -23,8 +23,8 @@ class Vwap:
             settings['max_memory_span_days'] * 1000 * 60 * 60 * 24
         self.settings['entry_spread_plus'] = 1 + settings['entry_spread'] / 2
         self.settings['entry_spread_minus'] = 1 - settings['entry_spread'] / 2
-        self.settings['entry_delay_millis'] = \
-            settings['min_seconds_between_same_side_entries'] * 1000
+        self.max_cost_per_symbol_per_hour = \
+            settings['account_equity_pct_per_hour'] / len(settings['symbols'])
         self.user = settings['user']
         self.symbols = settings['symbols']
         self.symbols_set = set(self.symbols)
@@ -554,7 +554,8 @@ class Vwap:
             small_trade_cost * self.settings['min_big_trade_cost_multiplier'],
             self.my_trades_analyses[s]['small_big_amount_threshold'] * self.cm.last_price[s] * 1.1
         )
-
+        entry_delay_millis = \
+            (60 * 60 * 1000) / (self.max_cost_per_symbol_per_hour / small_trade_cost)
 
         # set ideal orders
         exponent = self.settings['entry_vol_modifier_exponent']
@@ -575,8 +576,7 @@ class Vwap:
                      self.my_trades_analyses[s]['shrt_buy_price'])**exponent
                 )
             ) if self.my_trades_analyses[s]['shrt_buy_price'] > 0.0 else 1.0
-            if now_millis - self.my_trades_analyses[s]['shrt_end_ts'] > \
-                    self.settings['entry_delay_millis']:
+            if now_millis - self.my_trades_analyses[s]['last_shrt_entry_ts'] > entry_delay_millis:
                 shrt_sel_amount = small_trade_cost * shrt_amount_modifier / shrt_sel_price
             else:
                 shrt_sel_amount = 0.0
@@ -602,8 +602,7 @@ class Vwap:
                      self.cm.last_price[s])**exponent
                 )
             )
-            if now_millis - self.my_trades_analyses[s]['long_end_ts'] > \
-                    self.settings['entry_delay_millis']:
+            if now_millis - self.my_trades_analyses[s]['last_long_entry_ts'] > entry_delay_millis:
                 long_buy_amount = small_trade_cost * long_amount_modifier / long_buy_price
             else:
                 long_buy_amount = 0.0
@@ -1062,7 +1061,7 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
     shrt_cost, shrt_amount = 0.0, 0.0
 
     long_start_ts, shrt_start_ts = 0, 0
-    long_end_ts, shrt_end_ts = 0, 0
+    last_long_entry_ts, last_shrt_entry_ts = 0, 0
 
     for mt in my_trades:
         if mt['side'] == 'buy':
@@ -1070,7 +1069,7 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
                 # long buy
                 long_amount += mt['amount']
                 long_cost += mt['cost']
-                long_end_ts = mt['timestamp']
+                last_long_entry_ts = mt['timestamp']
             else:
                 # shrt buy
                 shrt_amount -= mt['amount']
@@ -1084,7 +1083,7 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
                 # shrt sel
                 shrt_amount += mt['amount']
                 shrt_cost += mt['cost']
-                shrt_end_ts = mt['timestamp']
+                last_shrt_entry_ts = mt['timestamp']
             else:
                 # long sel
                 long_amount -= mt['amount']
@@ -1102,8 +1101,8 @@ def analyze_my_trades(my_trades: [dict]) -> ([dict], dict):
                 'true_shrt_vwap': shrt_cost / shrt_amount if shrt_amount else 0.0,
                 'long_start_ts': long_start_ts,
                 'shrt_start_ts': shrt_start_ts,
-                'long_end_ts': long_end_ts,
-                'shrt_end_ts': shrt_end_ts,
+                'last_long_entry_ts': last_long_entry_ts,
+                'last_shrt_entry_ts': last_shrt_entry_ts,
                 'small_big_amount_threshold': small_big_amount_threshold}
 
     start_ts = min(long_start_ts, shrt_start_ts) - 1000 * 60 * 60 * 24
