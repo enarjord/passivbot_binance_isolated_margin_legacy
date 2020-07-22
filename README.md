@@ -131,6 +131,7 @@ about the settings:
                                                 # and short buy price becomes 0.00005 * (1 - 0.0025) == 0.000049875
                                                 #
     "account_equity_pct_per_trade": 0.0001,     # percentage of total account equity to spend per symbol per trade
+    "account_equity_pct_per_hour": 0.01         # max percentage of total account equity to spend per symbol per hour
     "bnb_buffer": 50.3,                         # BNB buffer for paying fees and interest, and for vip status
     "max_memory_span_days": 120,                # how many days past the bot will take trade history into account
     "snapshot_timestamp_millis": 0,             # timestamp in millis from which bot will take trade history into account
@@ -146,13 +147,11 @@ about the settings:
                                                 # -  10%, will increase entry vol by up to ~310%
                                                 # - >11%, will increase entry vol by up to ~400%
                                                 # set exponent = 0 and there will be no entry_vol modification
-    "min_big_trade_cost_multiplier": 10,        # the exits are at least 10 times larger than the entries
+    "min_exit_cost_multiplier": 10,             # the exits are at least 10 times larger than the entries
                                                 # the entry size can be up to (10 - 1) times larger,
                                                 # modified by distance between exit price and current price
-    "entry_spread": 0.005,                      # max_bid_price = min(emas) * (1 - entry_spread / 2)
+    "entry_spread": 0.002,                      # max_bid_price = min(emas) * (1 - entry_spread / 2)
                                                 # min_ask_price = max(emas) * (1 + entry_spread / 2)
-    "min_seconds_between_same_side_entries": 60 # min seconds between same side entries
-
 
 
 
