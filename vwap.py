@@ -25,6 +25,7 @@ class Vwap:
         self.settings['entry_spread_minus'] = 1 - settings['entry_spread'] / 2
         self.max_cost_per_symbol_per_hour = \
             settings['account_equity_pct_per_hour'] / len(settings['symbols'])
+        self.HOUR_TO_MILLIS = 60 * 60 * 1000
         self.user = settings['user']
         self.symbols = settings['symbols']
         self.symbols_set = set(self.symbols)
@@ -556,9 +557,14 @@ class Vwap:
             entry_cost * self.settings['min_exit_cost_multiplier'],
             self.my_trades_analyses[s]['entry_exit_amount_threshold'] * self.cm.last_price[s] * 1.1
         )
-        entry_delay_millis = \
-            (60 * 60 * 1000) / (self.max_cost_per_symbol_per_hour / entry_cost)
-
+        long_entry_delay_millis = \
+            self.HOUR_TO_MILLIS / (self.max_cost_per_symbol_per_hour /
+                                   max(8e-8, min(self.my_trades_analyses[s]['last_long_entry_cost'],
+                                                 entry_cost)))
+        shrt_entry_delay_millis = \
+            self.HOUR_TO_MILLIS / (self.max_cost_per_symbol_per_hour /
+                                   max(8e-8, min(self.my_trades_analyses[s]['last_shrt_entry_cost'],
+                                                 entry_cost)))
         # set ideal orders
         exponent = self.settings['entry_vol_modifier_exponent']
         now_millis = self.cc.milliseconds()
@@ -578,7 +584,8 @@ class Vwap:
                      self.my_trades_analyses[s]['shrt_buy_price'])**exponent
                 )
             ) if self.my_trades_analyses[s]['shrt_buy_price'] > 0.0 else 1.0
-            if now_millis - self.my_trades_analyses[s]['last_shrt_entry_ts'] > entry_delay_millis:
+            if now_millis - self.my_trades_analyses[s]['last_shrt_entry_ts'] > \
+                    shrt_entry_delay_millis:
                 shrt_sel_amount = entry_cost * shrt_amount_modifier / shrt_sel_price
             else:
                 shrt_sel_amount = 0.0
@@ -604,7 +611,8 @@ class Vwap:
                      self.cm.last_price[s])**exponent
                 )
             )
-            if now_millis - self.my_trades_analyses[s]['last_long_entry_ts'] > entry_delay_millis:
+            if now_millis - self.my_trades_analyses[s]['last_long_entry_ts'] > \
+                    long_entry_delay_millis:
                 long_buy_amount = entry_cost * long_amount_modifier / long_buy_price
             else:
                 long_buy_amount = 0.0
@@ -1062,6 +1070,7 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
 
     long_start_ts, shrt_start_ts = 0, 0
     last_long_entry_ts, last_shrt_entry_ts = 0, 0
+    last_long_entry_cost, last_shrt_entry_cost = 0.0, 0.0
 
     for mt in my_trades:
         if mt['side'] == 'buy':
@@ -1070,6 +1079,7 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
                 long_amount += mt['amount']
                 long_cost += mt['cost']
                 last_long_entry_ts = mt['timestamp']
+                last_long_entry_cost = mt['cost']
             else:
                 # shrt buy
                 shrt_amount -= mt['amount']
@@ -1084,6 +1094,7 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
                 shrt_amount += mt['amount']
                 shrt_cost += mt['cost']
                 last_shrt_entry_ts = mt['timestamp']
+                last_shrt_entry_cost = mt['cost']
             else:
                 # long sel
                 long_amount -= mt['amount']
@@ -1103,6 +1114,8 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
                 'shrt_start_ts': shrt_start_ts,
                 'last_long_entry_ts': last_long_entry_ts,
                 'last_shrt_entry_ts': last_shrt_entry_ts,
+                'last_long_entry_cost': last_long_entry_cost,
+                'last_shrt_entry_cost': last_shrt_entry_cost,
                 'entry_exit_amount_threshold': entry_exit_amount_threshold}
 
     start_ts = min(long_start_ts, shrt_start_ts) - 1000 * 60 * 60 * 24
