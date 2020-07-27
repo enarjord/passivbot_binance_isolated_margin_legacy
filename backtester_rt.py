@@ -163,6 +163,9 @@ def backtest(df: pd.DataFrame, settings: dict):
     millis_wait_until_next_long_entry = {s: 0 for s in symbols}
     millis_wait_until_next_shrt_entry = {s: 0 for s in symbols}
 
+    coins_shrt = set(settings['coins_shrt'])
+    coins_long = set(settings['coins_long'])
+
     balance_list = []
 
     cost = min(acc_equity_quot * settings['account_equity_pct_per_trade'],
@@ -185,7 +188,8 @@ def backtest(df: pd.DataFrame, settings: dict):
 
         if row.entry:
             if row.is_buyer_maker:
-                if row.Index - prev_long_entry_ts[s] >= millis_wait_until_next_long_entry[s]:
+                if coin in coins_long and \
+                        row.Index - prev_long_entry_ts[s] >= millis_wait_until_next_long_entry[s]:
                     cost = default_cost
                     if long_cost[s] > 0.0:
                         cost *= max(
@@ -211,7 +215,8 @@ def backtest(df: pd.DataFrame, settings: dict):
                         millis_wait_until_next_long_entry[s] = \
                             1 / (max_cost_per_symbol_per_hour / (default_cost * hour_to_millis))
             else:
-                if row.Index - prev_shrt_entry_ts[s] >= millis_wait_until_next_shrt_entry[s]:
+                if coin in coins_shrt and \
+                        row.Index - prev_shrt_entry_ts[s] >= millis_wait_until_next_shrt_entry[s]:
                     cost = default_cost
                     if shrt_cost[s] > 0.0:
                         cost *= max(
@@ -237,7 +242,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                             1 / (max_cost_per_symbol_per_hour / (default_cost * hour_to_millis))
         if row.is_buyer_maker:
             exit_price = min(row.exit_price, shrt_exit_price[s])
-            if row.price < exit_price and \
+            if coin in coins_shrt and row.price < exit_price and \
                     shrt_cost[s] >= default_cost * settings['min_exit_cost_multiplier']:
                 exit_cost = shrt_amount[s] * exit_price
                 partial_cost = balance[quot] + credit_avbl_quot
@@ -267,7 +272,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                         shrt_exit_price[s] = shrt_cost[s] / shrt_amount[s]
         else:
             exit_price = max(row.exit_price, long_exit_price[s])
-            if row.price > exit_price and \
+            if coin in coins_long and row.price > exit_price and \
                     long_cost[s] >= default_cost * settings['min_exit_cost_multiplier']:
                 credit_avbl_coin = \
                     max(0.0, acc_equity_quot * margin - acc_debt_quot) / row.price
@@ -338,59 +343,7 @@ def backtest(df: pd.DataFrame, settings: dict):
 
 
 def main():
-    from passivbot import load_settings
-    settings = load_settings('default')
-    fee = 1 - 0.0675 * 0.01 # vip1
-
-    settings['hours_rolling_small_trade_window'] = 1.0
-    settings['account_equity_pct_per_trade'] = 0.0002
-    settings['exponent'] = 15
-
-
-    symbols = [f'{c}/BTC' for c in settings['coins_long']]
-    symbols = sorted(symbols)
-    n_days = 30 * 13
-    #symbols = [s for s in symbols if not any(s.startswith(c) for c in ['VET', 'IOST'])]
-    print('loading ohlcvs')
-    high_low_means = load_hlms(symbols, n_days, no_download=True)
-    print('adding emas')
-    df = add_emas(high_low_means, settings['ema_spans_minutes'])
-
-
-    results = []
-    for aepph in list(np.linspace(0.00037, 0.0005, 20).round(6)):
-        for mmsd in list(np.linspace(120, 120, 1).round().astype(int)):
-            print('testing', aepph, mmsd)
-            settings['account_equity_pct_per_hour'] = aepph
-            settings['max_memory_span_days'] = mmsd
-
-            balance_list, lentr, sentr, lexit, sexit, lexitpl, sexitpl = backtest(df, settings)
-            bldf = pd.DataFrame(balance_list).set_index('timestamp')
-            start_equity = bldf.acc_equity_quot.iloc[0]
-            end_equity = bldf.acc_equity_quot.iloc[-1]
-            n_days = (bldf.index[-1] - bldf.index[0]) / 1000 / 60 / 60 / 24
-            avg_daily_gain = (end_equity / start_equity)**(1 / n_days)
-            print()
-            print(aepph, mmsd, 'average daily gain', round(avg_daily_gain, 8))
-            print(aepph, mmsd, '    low water mark', bldf.acc_equity_quot.min())
-            print(aepph, mmsd, '   high water mark', bldf.acc_equity_quot.max())
-            print(aepph, mmsd, '              mean', bldf.acc_equity_quot.mean())
-            print(aepph, mmsd, '               end', bldf.acc_equity_quot.iloc[-1])
-
-            print('\n\n')
-
-            results.append({
-                'account_equity_pct_per_hour': aepph,
-                'max_memory_span_days': mmsd,
-                'average daily gain': avg_daily_gain,
-                'low water mark': bldf.acc_equity_quot.min(),
-                'high water mark': bldf.acc_equity_quot.max(),
-                'mean': bldf.acc_equity_quot.mean(),
-                'end': bldf.acc_equity_quot.iloc[-1],
-            })
-    for r in sorted(results, key=lambda x: x['mean']):
-        print(r)
-
+    pass
 
 if __name__ == '__main__':
     main()
