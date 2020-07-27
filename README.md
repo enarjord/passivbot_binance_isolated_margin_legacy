@@ -139,14 +139,16 @@ about the settings:
                                                 # it calculates any number of emas,
                                                 # and sets highest allowed bid = min(emas) and lowest allowed ask = max(emas)
     "entry_vol_modifier_exponent": 12,          # entry volume is modified by the following formula:
-                                                # max_long_entry_vol *= max(1.0, min(5.0, (long_exit_price / current_price)**exponent))
-                                                # max_shrt_entry_vol *= max(1.0, min(5.0, (current_price / shrt_exit_price)**exponent))
-                                                # difference between exit_price and current price of
-                                                # -   2%, will increase entry vol by up to ~34%
-                                                # -   5%, will increase entry vol by up to ~100%
-                                                # -  10%, will increase entry vol by up to ~310%
-                                                # - >11%, will increase entry vol by up to ~400%
-                                                # set exponent = 0 and there will be no entry_vol modification
+                                                # max_long_entry_vol *= max(
+                                                      1.0, min(settings["min_exit_cost_multiplier"] - 1,
+                                                               (long_exit_price / current_price)**entry_vol_modifier_exponent)
+                                                  )
+                                                # max_shrt_entry_vol *= max(
+                                                      1.0, min(settings["min_exit_cost_multiplier"] - 1,
+                                                               (current_price / shrt_exit_price)**entry_vol_modifier_exponent)
+                                                  )
+                                                # bigger difference between exit_price and current price gives bigger entries
+                                                # set entry_vol_modifier_exponent = 0 and there will be no entry_vol modification
     "min_exit_cost_multiplier": 10,             # the exits are at least 10 times larger than the entries
                                                 # the entry size can be up to (10 - 1) times larger,
                                                 # modified by distance between exit price and current price
