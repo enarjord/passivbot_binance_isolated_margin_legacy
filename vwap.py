@@ -23,7 +23,7 @@ class Vwap:
             settings['max_memory_span_days'] * 1000 * 60 * 60 * 24
         self.settings['entry_spread_plus'] = 1 + settings['entry_spread'] / 2
         self.settings['entry_spread_minus'] = 1 - settings['entry_spread'] / 2
-        self.max_cost_per_symbol_per_hour = \
+        self.account_equity_pct_per_symbol_per_hour = \
             settings['account_equity_pct_per_hour'] / len(settings['symbols'])
         self.HOUR_TO_MILLIS = 60 * 60 * 1000
         self.user = settings['user']
@@ -32,27 +32,34 @@ class Vwap:
         self.coins = settings['coins']
         self.quot = settings['quot']
         self.all_coins_set = set(list(self.coins) + [self.quot])
-        self.symbol_split = {symbol: symbol.split('/') for symbol in self.symbols}
+        self.active_coins_set = set(settings['coins_long'] + settings['coins_shrt'] + [self.quot])
+        self.symbol_split = {symbol: symbol.split('/') for symbol in self.cc.markets}
         self.do_shrt_sel = {symbol for symbol in self.symbols
                             if self.symbol_split[symbol][0] in settings['coins_shrt']}
         self.do_long_buy = {symbol for symbol in self.symbols
                             if self.symbol_split[symbol][0] in settings['coins_long']}
-        self.do_shrt_buy = {symbol for symbol in self.symbols}
-        self.do_long_sel = {symbol for symbol in self.symbols}
+        self.do_liquidate = {symbol for symbol in self.symbols
+                             if self.symbol_split[symbol][0] in settings['coins_liquidate']}
+        self.do_shrt_buy = {symbol for symbol in self.symbols if symbol not in self.do_liquidate}
+        self.do_long_sel = {symbol for symbol in self.symbols if symbol not in self.do_liquidate}
         self.do_borrow = {coin for coin in self.all_coins_set
-                          if coin not in settings['do_not_borrow']}
-        self.nodash_to_dash_map = {symbol.replace('/', ''): symbol for symbol in self.symbols}
+                          if coin not in settings['do_not_borrow'] + settings['coins_liquidate']}
+        self.nodash_to_dash_map = {symbol.replace('/', ''): symbol for symbol in self.symbol_split}
         self.balance = {}
         self.my_trades = {}
         self.my_trades_analyses = {s: {} for s in self.symbols}
-        self.ideal_long_sel = {s: {'price': 0.0, 'amount': 0.0, 'side': 'sell'}
+        self.ideal_long_sel = {s: {'side': 'sell', 'amount': 0.0, 'price': 0.0}
                                for s in self.symbols}
-        self.ideal_shrt_buy = {s: {'price': 0.0, 'amount': 0.0, 'side': 'buy'}
+        self.ideal_shrt_buy = {s: {'side': 'buy', 'amount': 0.0, 'price': 0.0}
                                for s in self.symbols}
-        self.ideal_long_buy = {s: {'price': 0.0, 'amount': 0.0, 'side': 'buy'}
+        self.ideal_long_buy = {s: {'side': 'buy', 'amount': 0.0, 'price': 0.0}
                                for s in self.symbols}
-        self.ideal_shrt_sel = {s: {'price': 0.0, 'amount': 0.0, 'side': 'sell'}
+        self.ideal_shrt_sel = {s: {'side': 'sell', 'amount': 0.0, 'price': 0.0}
                                for s in self.symbols}
+        self.ideal_liqui_sel = {s: {'side': 'sell', 'amount': 0.0, 'price': 0.0}
+                                for s in self.symbols}
+        self.ideal_liqui_buy = {s: {'side': 'buy', 'amount': 0.0, 'price': 0.0}
+                                for s in self.symbols}
         self.ideal_borrow = {c: 0.0 for c in self.all_coins_set}
         self.ideal_repay = {c: 0.0 for c in self.all_coins_set}
         self.my_bids = {symbol: [] for symbol in self.symbols}
@@ -64,11 +71,14 @@ class Vwap:
         self.d = {k: {} for k in set(self.symbols + list(self.all_coins_set))}
         self.eligible_entries = []
         self.eligible_exits = []
-        self.liquidation_orders = {}
         self.prev_execution_ts = 0
         self.prev_loan_ts = {c_: 0 for c_ in sorted(self.all_coins_set) + ['all']}
         self.prev_repay_ts = {c_: 0 for c_ in self.all_coins_set}
 
+        self.updating_intervals = {'update_balance': 25,
+                                   'update_open_orders': 60,
+                                   'update_my_trades': 90,
+                                   'dump_balance_log': 60 * 60}
         self.time_keepers = {'update_balance': 0,
                              'update_open_orders': {symbol: 0 for symbol in self.symbols},
                              'update_my_trades': {symbol: 0 for symbol in self.symbols},
@@ -76,10 +86,6 @@ class Vwap:
                              'update_repay_history': {c: 0 for c in self.all_coins_set},
                              'future_handling_lock': 0,
                              'dump_balance_log': 0}
-        self.updating_intervals = {'update_balance': 25,
-                                   'update_open_orders': 60,
-                                   'update_my_trades': 90,
-                                   'dump_balance_log': 60 * 60}
 
         self.balance_log_filepath = make_get_filepath(
             f'logs/binance/{self.user}/balance_margin.txt')
@@ -97,10 +103,18 @@ class Vwap:
 
     def init(self):
         self.update_balance()
+        assert not any([cl in self.do_long_buy | self.do_shrt_sel for cl in self.do_liquidate])
         calls = []
-        for i, symbol in enumerate(self.symbols):
-            coin, quot = self.symbol_split[symbol]
-            calls.append(threaded(self.update_my_trades)(symbol))
+        for i, s in enumerate(self.symbols):
+            coin, quot = self.symbol_split[s]
+            entry_cost_default = max(self.min_trade_costs[s],
+                                     (self.balance[quot]['account_equity'] *
+                                      self.settings['account_equity_pct_per_trade']))
+            entry_cost = max(10**-self.amount_precisions[s] * self.cm.last_price[s],
+                             entry_cost_default)
+            self.d[s]['entry_cost'] = entry_cost
+
+            calls.append(threaded(self.update_my_trades)(s))
             sleep(0.1)
         recent_repays_future = {}
         print()
@@ -222,8 +236,13 @@ class Vwap:
         self.print_update(update)
 
     def print_update(self, update: dict):
-        print_(['margin', {k: update[k] for k in ['coin', 'symbol', 'side', 'type', 'status',
-                                                  'price', 'amount', 'tranId'] if k in update}])
+        if update is None:
+            return
+        try:
+            print_(['margin', {k: update[k] for k in ['coin', 'symbol', 'side', 'type', 'status',
+                                                      'price', 'amount', 'tranId'] if k in update}])
+        except(Exception) as e:
+            print_(['error printing update', e])
 
     def update_balance(self):
         '''
@@ -231,9 +250,10 @@ class Vwap:
         '''
         print_(['margin updating balance'])
         fetched = self.cc.sapi_get_margin_account()
+        account_equity = float(fetched['totalNetAssetOfBtc'])
+        account_debt = float(fetched['totalLiabilityOfBtc'])
+        account_onhand = float(fetched['totalAssetOfBtc'])
         new_balance = {}
-        onhand_sum_quot = 0.0
-        debt_sum_quot = 0.0
         borrowable_quot = self.fetch_borrowable(self.quot)
         for e in fetched['userAssets']:
             c = e['asset']
@@ -249,12 +269,7 @@ class Vwap:
             new_balance[c]['onhand'] = new_balance[c]['free'] + new_balance[c]['used']
             new_balance[c]['debt'] = new_balance[c]['interest'] + new_balance[c]['borrowed']
             if c not in self.all_coins_set:
-                new_balance[c]['liquidate'] = True
                 continue
-            else:
-                new_balance[c]['liquidate'] = False
-            onhand_sum_quot += self.cm.convert_amount(new_balance[c]['onhand'], c, self.quot)
-            debt_sum_quot += self.cm.convert_amount(new_balance[c]['debt'], c, self.quot)
             new_balance[c]['borrowable'] = (self.cm.convert_amount(borrowable_quot, self.quot, c)
                                             if c in self.do_borrow else 0.0)
         for c in self.all_coins_set:
@@ -264,8 +279,8 @@ class Vwap:
                 new_balance[c]['borrowable'] = \
                     (self.cm.convert_amount(borrowable_quot, self.quot, c)
                      if c in self.do_borrow else 0.0)
-            new_balance[c]['account_onhand'] = self.cm.convert_amount(onhand_sum_quot, self.quot, c)
-            new_balance[c]['account_debt'] = self.cm.convert_amount(debt_sum_quot, self.quot, c)
+            new_balance[c]['account_onhand'] = self.cm.convert_amount(account_onhand, self.quot, c)
+            new_balance[c]['account_debt'] = self.cm.convert_amount(account_debt, self.quot, c)
             new_balance[c]['account_equity'] = \
                 new_balance[c]['account_onhand'] - new_balance[c]['account_debt']
             try:
@@ -362,10 +377,9 @@ class Vwap:
     def set_analysis(self, s: str, my_trades: [dict]):
         age_limit_millis = max(self.cc.milliseconds() - self.settings['max_memory_span_millis'],
                                self.settings['snapshot_timestamp_millis'])
-        entry_exit_amount_threshold = calc_entry_exit_threshold_amount(
-            my_trades,
-            m=self.settings['min_exit_cost_multiplier'] - 1
-        )
+        entry_exit_amount_threshold = (self.d[s]['entry_cost'] *
+                                       (self.settings['min_exit_cost_multiplier'] - 0.5) /
+                                       self.cm.last_price[s])
         my_trades_cropped, analysis = analyze_my_trades(
             [mt for mt in my_trades if mt['timestamp'] > age_limit_millis],
             entry_exit_amount_threshold
@@ -553,16 +567,14 @@ class Vwap:
                                   self.settings['account_equity_pct_per_trade']))
         entry_cost = max(10**-self.amount_precisions[s] * self.cm.last_price[s], entry_cost_default)
 
-        self.d[s]['min_exit_cost'] = max(
-            entry_cost * self.settings['min_exit_cost_multiplier'],
-            self.my_trades_analyses[s]['entry_exit_amount_threshold'] * self.cm.last_price[s] * 1.1
-        )
+        self.d[s]['entry_cost'] = entry_cost
+        self.d[s]['min_exit_cost'] = entry_cost * self.settings['min_exit_cost_multiplier']
         long_entry_delay_millis = \
-            self.HOUR_TO_MILLIS / (self.max_cost_per_symbol_per_hour /
+            self.HOUR_TO_MILLIS / (self.account_equity_pct_per_symbol_per_hour /
                                    max(8e-8, min(self.my_trades_analyses[s]['last_long_entry_cost'],
                                                  entry_cost)))
         shrt_entry_delay_millis = \
-            self.HOUR_TO_MILLIS / (self.max_cost_per_symbol_per_hour /
+            self.HOUR_TO_MILLIS / (self.account_equity_pct_per_symbol_per_hour /
                                    max(8e-8, min(self.my_trades_analyses[s]['last_shrt_entry_cost'],
                                                  entry_cost)))
         # set ideal orders
@@ -646,51 +658,46 @@ class Vwap:
                                else lowest_other_ask['price']),
                               self.my_trades_analyses[s]['long_sel_price']])
             }
-
-    def set_liquidation_order(self, s: str):
-        '''
-        run async
-        '''
-        coin, quot = self.symbol_split[s]
-        ticker = self.cc.fetch_ticker(s)
-        ohlcv = self.cc.fetch_ohlcv(s, limit=1000)
-        self.cm.init_ema(s)
-        entry_cost = max(self.min_trade_costs[s],
-                         (self.balance[quot]['account_equity'] *
-                          self.settings['account_equity_pct_per_trade']))
-        bid_price = round_dn(min(ticker['bid'], self.cm.min_ema[s]), self.price_precisions[s])
-        ask_price = round_up(max(ticker['ask'], self.cm.max_ema[s]), self.price_precisions[s])
-
-        bid_amount = round_up(entry_cost / bid_price, self.amount_precisions[s])
-        ask_amount = round_up(entry_cost / ask_price, self.amount_precisions[s])
-        if quot == self.quot:
-            if self.balance[coin]['debt'] > 0.0:
-                if self.balance[coin]['debt'] >= self.balance[coin]['onhand']:
-                    repay_amount = self.balance[coin]['onhand']
-                    ask_amount = 0.0
-                else:
-                    repay_amount = self.balance[coin]['debt']
-                    bid_amount = 0.0
-                    if self.balance[coin]['onhand'] - self.balance[coin]['debt'] < \
-                            self.min_trade_costs[s] / ask_price:
-                        ask_amount = 0.0
+        if s in self.do_liquidate:
+            liqui_cost = max(self.min_trade_costs[s],
+                             (self.balance[quot]['account_equity'] *
+                              self.settings['account_equity_pct_per_trade'] * 10))
+            bid_price = min([
+                round_dn(self.cm.min_ema[s], self.price_precisions[s]),
+                other_ask_decr,
+                (other_bid_incr if liqui_cost / other_bid_incr < highest_other_bid['amount']
+                 else highest_other_bid['price'])
+            ])
+            ask_price = max([
+                round_up(self.cm.max_ema[s], self.price_precisions[s]),
+                other_bid_incr,
+                (other_ask_decr if liqui_cost / other_ask_decr < lowest_other_ask['amount']
+                 else lowest_other_ask['price'])])
+            repay_amount = min(self.balance[coin]['debt'], self.balance[coin]['onhand'])
+            bid_amount = max(
+                0.0,
+                round_up(min(liqui_cost / bid_price,
+                             self.balance[coin]['debt'] - self.balance[coin]['onhand']),
+                         self.amount_precisions[s])
+            )
+            ask_amount = max(
+                0.0,
+                min(round_up(liqui_cost / ask_price, self.amount_precisions[s]),
+                    round_dn(self.balance[coin]['onhand'] - self.balance[coin]['debt'],
+                             self.amount_precisions[s]))
+            )
+            if ask_amount * ask_price > self.min_trade_costs[s] and ask_price > 0.0:
+                self.ideal_liqui_sel[s] = {'symbol': s, 'side': 'sell', 'amount': ask_amount,
+                                           'price': ask_price}
             else:
-                repay_amount = 0.0
-                bid_amount = 0.0
-                if self.balance[coin]['onhand'] < self.min_trade_costs[s] / ask_price:
-                    ask_amount = 0.0
-        elif coin == self.quot:
-            pass
-        self.liquidation_orders[s] = []
-        if bid_price and bid_amount:
-            self.liquidation_orders[s].append(
-                {'symbol': s, 'side': 'buy', 'amount': bid_amount, 'price': bid_price})
-        if ask_price and ask_amount:
-            self.liquidation_orders[s].append(
-                {'symbol': s, 'side': 'sell', 'amount': ask_amount, 'price': ask_price})
-        if repay_amount:
-            self.liquidation_orders[s].append(
-                {'symbol': s, 'side': 'repay', 'amount': repay_amount})
+                self.ideal_liqui_sel[s] = {'symbol': s, 'side': 'sell', 'amount': 0.0, 'price': 0.0}
+            if bid_amount * bid_price > self.min_trade_costs[s] and ask_price > 0.0:
+                self.ideal_liqui_buy[s] = {'symbol': s, 'side': 'buy', 'amount': bid_amount,
+                                           'price': bid_price}
+            else:
+                self.ideal_liqui_buy[s] = {'symbol': s, 'side': 'buy', 'amount': 0.0, 'price': 0.0}
+            if repay_amount > 0.0:
+                self.ideal_repay[coin] = repay_amount
 
     def allocate_credit(self):
         # allocate credit and select eligible orders
@@ -699,7 +706,7 @@ class Vwap:
         # if any exit is close to filling, borrow to cover exit(s)
         credit_available_quot = self.balance[self.quot]['borrowable'] * 0.995
 
-        borrows = {c_: 0.0 for c_ in self.all_coins_set}
+        borrows = {c_: 0.0 for c_ in self.active_coins_set}
         coin_available = {c_: (self.tradable_bnb if c_ == 'BNB' else self.balance[c_]['onhand'])
                           for c_ in self.all_coins_set}
 
@@ -721,7 +728,8 @@ class Vwap:
                 if (diff := entry['amount'] - coin_available[c_]) > 0.0:
                     # not enough coin onhand, borrow
 
-                    to_borrow = min(credit_available_quot / entry['price'], diff)
+                    to_borrow = min(credit_available_quot / entry['price'], diff) \
+                        if c_ in self.do_borrow else 0.0
                     borrows[c_] += to_borrow
                     credit_available_quot -= to_borrow * entry['price']
                     if coin_available[c_] + to_borrow >= entry['amount']:
@@ -764,7 +772,14 @@ class Vwap:
             if exit['side'] == 'sell':
                 if (diff := exit['amount'] - coin_available[c_]) > 0.0:
                     # not enough coin for full long exit
-                    if (credit_available_coin := credit_available_quot / exit['price']) < diff:
+                    if c_ not in self.do_borrow:
+                        # partial exit with coin onhand
+                        exit['partial_amount'] = round_dn(coin_available[c_],
+                                                          self.amount_precisions[s_])
+                        if exit['partial_amount'] * exit['price'] > self.d[s_]['min_exit_cost']:
+                            coin_available[c_] = 0.0
+                            eligible_exits.append(exit)
+                    elif (credit_available_coin := credit_available_quot / exit['price']) < diff:
                         # we do partial exit
                         partial_exit_cost = \
                             credit_available_quot + coin_available[c_] * exit['price']
@@ -822,6 +837,15 @@ class Vwap:
                     else:
                         coin_available[q_] -= exit_cost
                     eligible_exits.append(exit)
+        # liquidation orders
+        for s_ in self.ideal_liqui_sel:
+            if self.ideal_liqui_sel[s_]['amount'] > 0.0 and self.ideal_liqui_sel[s_]['price'] > 0.0:
+                eligible_exits.append(self.ideal_liqui_sel[s_])
+        for s_ in self.ideal_liqui_buy:
+            if self.ideal_liqui_buy[s_]['amount'] > 0.0 and self.ideal_liqui_buy[s_]['price'] > 0.0:
+                if coin_available[q_] >= \
+                        self.ideal_liqui_buy[s_]['amount'] * self.ideal_liqui_buy[s_]['price']:
+                    eligible_exits.append(self.ideal_liqui_buy[s_])
         self.eligible_entries = [{k: e[k] for k in ['symbol', 'side', 'amount', 'price']}
                                  for e in eligible_entries]
         pa = 'partial_amount'
@@ -833,6 +857,9 @@ class Vwap:
             borrows[c_] -= min(self.balance[c_]['debt'], coin_available[c_])
             self.ideal_borrow[c_] = max(0.0, borrows[c_])
             self.ideal_repay[c_] = max(0.0, -borrows[c_])
+            if c_ not in self.do_borrow:
+                self.ideal_borrow[c_] = 0.0
+                self.ideal_repay[c_] = min(self.balance[c_]['onhand'], self.balance[c_]['debt'])
 
     def execute_to_exchange(self):
         now = time()
@@ -884,7 +911,8 @@ class Vwap:
                           self.eligible_entries + self.eligible_exits)
         lod, loc = len(order_deletions), len(order_creations)
         if any([lod, loc]):
-            print('deletion queue', lod, 'creation queue', loc)
+            print('deletion queue', lod, 'creation queue',
+                  [list(oc.values()) for oc in order_creations])
         else:
             if self.counter % 21 == 0:
                 print('deletion queue', lod, 'creation queue', loc)
@@ -1057,12 +1085,6 @@ class Vwap:
 ####################################################################################################
 
 
-def calc_entry_exit_threshold_amount(my_trades: [dict], cutoff: float = 0.83333, m: float = 2.1):
-    if len(my_trades) < 10:
-        return 9e9
-    return sorted((amts := [e['amount'] for e in my_trades]))[:int(len(amts) * cutoff)][-1] * m
-
-
 def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> ([dict], dict):
 
     long_cost, long_amount = 0.0, 0.0
@@ -1118,6 +1140,6 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
                 'last_shrt_entry_cost': last_shrt_entry_cost,
                 'entry_exit_amount_threshold': entry_exit_amount_threshold}
 
-    start_ts = min(long_start_ts, shrt_start_ts) - 1000 * 60 * 60 * 24
+    start_ts = min(long_start_ts, shrt_start_ts) - 1000 * 60 * 60 * 24 * 3
     _, cropped_my_trades = partition_sorted(my_trades, lambda x: x['timestamp'] >= start_ts)
     return cropped_my_trades, analysis
