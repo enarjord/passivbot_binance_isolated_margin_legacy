@@ -70,6 +70,7 @@ def create_df(symbols: [str],
               no_download: bool = False):
     dfs = []
     for s in symbols:
+        coin, quot = s.split('/')
         print('preparing', s)
         rt = trade_data.fetch_raw_trades(s, n_days=n_days, no_download=no_download)
         print('precision')
@@ -80,8 +81,8 @@ def create_df(symbols: [str],
         print('elapsed seconds calc emas', round(time() - start_ts, 2))
         ema_min = rt_emas.min(axis=1)
         ema_max = rt_emas.max(axis=1)
-        long_entry = round_dn(ema_min * (1 - settings['entry_spread']), precision)
-        shrt_entry = round_up(ema_max * (1 + settings['entry_spread']), precision)
+        long_entry = round_dn(ema_min * (1 - settings['coins'][coin]['entry_spread']), precision)
+        shrt_entry = round_up(ema_max * (1 + settings['coins'][coin]['entry_spread']), precision)
         long_exit = round_up(ema_max, precision)
         shrt_exit = round_dn(ema_min, precision)
         rt.loc[:, 'entry_price'] = long_entry.where(rt.is_buyer_maker, shrt_entry)
@@ -94,44 +95,17 @@ def create_df(symbols: [str],
         dfs.append(rt.set_index('timestamp'))
     return pd.concat(dfs, axis=0).sort_index()
 
-def create_df_old(symbols: [str],
-              n_days: int,
-              ema_spans: [int],
-              entry_spread: float,
-              no_download: bool = False):
-    dfs = []
-    for s in symbols:
-        print('preparing', s)
-        rt = trade_data.fetch_raw_trades(s, n_days=n_days, no_download=no_download)
-        precision = find_precision(rt.price)
-        rt_emas = calc_ema_from_raw_trades(rt, ema_spans)
-        ema_min = (rt_emas.min(axis=1) * (1 - entry_spread)).apply(lambda x: round_dn(x, precision))
-        ema_max = (rt_emas.max(axis=1) * (1 + entry_spread)).apply(lambda x: round_up(x, precision))
-        buys = rt[(rt.is_buyer_maker & (rt.price < ema_min))]
-        b_grouped = buys.groupby('timestamp')
-        buys_df = pd.concat([b_grouped.amount.sum(),
-                             b_grouped.price.max(),
-                             b_grouped.is_buyer_maker.last()], axis=1)
-        sels = rt[((~rt.is_buyer_maker) & (rt.price > ema_max))]
-        s_grouped = sels.groupby('timestamp')
-        sels_df = pd.concat([s_grouped.amount.sum(),
-                             s_grouped.price.min(),
-                             s_grouped.is_buyer_maker.last()], axis=1)
-        df = pd.concat([buys_df, sels_df], axis=0).sort_index()
-        df = df.join(pd.Series(np.repeat(s, len(df)), index=df.index, name='symbol'))
-        dfs.append(df)
-    return pd.concat(dfs, axis=0).sort_index()
-
 
 def backtest(df: pd.DataFrame, settings: dict):
     symbols = list(df.symbol.unique())
+    quot = symbols[0].split('/')[1]
     df_mid = df.iloc[int(len(df) * 0.5):int(len(df) * 0.55)]
     precisions = {s: find_precision(df_mid[df_mid.symbol == s].price.values) for s in symbols}
 
-    ppctminus = 1 - settings['profit_pct']
-    ppctplus = 1 + settings['profit_pct']
+    ppctminus = {f'{c}/{quot}': 1 - settings['coins'][c]['profit_pct'] for c in settings['coins']}
+    ppctplus = {f'{c}/{quot}': 1 + settings['coins'][c]['profit_pct'] for c in settings['coins']}
+
     s2c = {s: s.split('/')[0] for s in symbols}
-    quot = symbols[0].split('/')[1]
 
     balance = {s2c[s]: 0.0 for s in s2c}
     balance[quot] = settings['start_quot']
@@ -159,17 +133,15 @@ def backtest(df: pd.DataFrame, settings: dict):
     margin = settings['margin'] - 1
     exponent = settings['entry_vol_modifier_exponent']
     max_multiplier = settings['min_exit_cost_multiplier'] / 2
-    account_equity_pct_per_symbol_per_hour = settings['account_equity_pct_per_hour'] / len(symbols)
+    account_equity_pct_per_symbol_per_hour = {c: settings['coins'][c]['account_equity_pct_per_hour']
+                                              for c in settings['coins']}
     millis_wait_until_next_long_entry = {s: 0 for s in symbols}
     millis_wait_until_next_shrt_entry = {s: 0 for s in symbols}
 
-    coins_shrt = set(settings['coins_shrt'])
-    coins_long = set(settings['coins_long'])
+    coins_long = set([c for c in settings['coins'] if settings['coins'][c]['long']])
+    coins_shrt = set([c for c in settings['coins'] if settings['coins'][c]['shrt']])
 
     balance_list = []
-
-    cost = min(acc_equity_quot * settings['account_equity_pct_per_trade'],
-           settings['min_quot_cost'])
 
     start_ts, end_ts = df.index[0], df.index[-1]
     ts_range = end_ts - start_ts
@@ -180,8 +152,10 @@ def backtest(df: pd.DataFrame, settings: dict):
     for row in df.itertuples():
         s = row.symbol
         coin = s2c[s]
-        default_cost = max(acc_equity_quot * settings['account_equity_pct_per_trade'],
-                           settings['min_quot_cost'])
+        default_cost = max(
+            acc_equity_quot * settings['coins'][coin]['account_equity_pct_per_trade'],
+            settings['min_quot_cost']
+        )
         credit_avbl_quot = max(0.0, acc_equity_quot * margin - acc_debt_quot)
         # bag_size_over_acc_equity = \
         #     sum([abs(v) for v in balance_ito_quot.values()]) / acc_equity_quot
@@ -206,14 +180,14 @@ def backtest(df: pd.DataFrame, settings: dict):
                                              'cost': cost})
                         long_cost[s] += cost
                         long_amount[s] += amount
-                        long_exit_price[s] = round_up((long_cost[s] / long_amount[s]) * ppctplus,
+                        long_exit_price[s] = round_up((long_cost[s] / long_amount[s]) * ppctplus[s],
                                                       precisions[s])
                         exit_prices_list.append({'timestamp': row.Index, 'symbol': s,
                                                  'side': 'sell',
                                                  'price': max(long_exit_price[s], row.exit_price)})
                         prev_long_entry_ts[s] = row.Index
-                        millis_wait_until_next_long_entry[s] = \
-                            1 / (account_equity_pct_per_symbol_per_hour / (default_cost * hour_to_millis))
+                        millis_wait_until_next_long_entry[s] = (default_cost * hour_to_millis) / \
+                            account_equity_pct_per_symbol_per_hour[coin]
             else:
                 if coin in coins_shrt and \
                         row.Index - prev_shrt_entry_ts[s] >= millis_wait_until_next_shrt_entry[s]:
@@ -233,13 +207,14 @@ def backtest(df: pd.DataFrame, settings: dict):
                                              'cost': cost})
                         shrt_cost[s] += cost
                         shrt_amount[s] += amount
-                        shrt_exit_price[s] = round_dn((shrt_cost[s] / shrt_amount[s]) * ppctminus,
-                                                      precisions[s])
+                        shrt_exit_price[s] = round_dn(
+                            (shrt_cost[s] / shrt_amount[s]) * ppctminus[s], precisions[s]
+                        )
                         exit_prices_list.append({'timestamp': row.Index, 'symbol': s, 'side': 'buy',
                                                  'price': min(shrt_exit_price[s], row.exit_price)})
                         prev_shrt_entry_ts[s] = row.Index
-                        millis_wait_until_next_shrt_entry[s] = \
-                            1 / (account_equity_pct_per_symbol_per_hour / (default_cost * hour_to_millis))
+                        millis_wait_until_next_shrt_entry[s] = (default_cost * hour_to_millis) / \
+                            account_equity_pct_per_symbol_per_hour[coin]
         if row.is_buyer_maker:
             exit_price = min(row.exit_price, shrt_exit_price[s])
             if coin in coins_shrt and row.price < exit_price and \
@@ -302,8 +277,8 @@ def backtest(df: pd.DataFrame, settings: dict):
                     if long_amount[s] <= 0.0 or long_cost[s] <= 0.0:
                         long_amount[s], long_cost[s], long_exit_price[s] = 0.0, 0.0, row.price
                     else:
-                        long_exit_price[s] = round_up((long_cost[s] / long_amount[s]) * ppctplus,
-                                                 precisions[s])
+                        long_exit_price[s] = round_up((long_cost[s] / long_amount[s]) * ppctplus[s],
+                                                      precisions[s])
 
         acc_equity_quot -= (balance_ito_quot[coin] + balance_ito_quot[quot])
         acc_debt_quot -= -(min(0.0, balance_ito_quot[coin]) + min(0.0, balance_ito_quot[quot]))
