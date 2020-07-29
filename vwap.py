@@ -186,6 +186,7 @@ class Vwap:
                                     threaded(getattr(self, key))(symbol)
                             sleep(0.01)
                     else:
+
                         if now - self.time_keepers[key] > self.updating_intervals[key]:
                             if 0 < self.time_keepers[key] < 10:
                                 self.time_keepers[key] += 1
@@ -378,7 +379,7 @@ class Vwap:
         age_limit_millis = max(self.cc.milliseconds() - self.settings['max_memory_span_millis'],
                                self.settings['snapshot_timestamp_millis'])
         entry_exit_amount_threshold = (self.d[s]['entry_cost'] *
-                                       (self.settings['min_exit_cost_multiplier'] - 0.5) /
+                                       (self.settings['min_exit_cost_multiplier'] * 0.75) /
                                        self.cm.last_price[s])
         my_trades_cropped, analysis = analyze_my_trades(
             [mt for mt in my_trades if mt['timestamp'] > age_limit_millis],
@@ -591,7 +592,7 @@ class Vwap:
             shrt_amount_modifier = max(
                 1.0,
                 min(
-                    self.settings['min_exit_cost_multiplier'] - 1,
+                    self.settings['min_exit_cost_multiplier'] / 2,
                     (self.cm.last_price[s] /
                      self.my_trades_analyses[s]['shrt_buy_price'])**exponent
                 )
@@ -618,7 +619,7 @@ class Vwap:
             long_amount_modifier = max(
                 1.0,
                 min(
-                    self.settings['min_exit_cost_multiplier'] - 1,
+                    self.settings['min_exit_cost_multiplier'] / 2,
                     (self.my_trades_analyses[s]['long_sel_price'] /
                      self.cm.last_price[s])**exponent
                 )
@@ -872,7 +873,6 @@ class Vwap:
                        for s in self.symbols]) + [self.time_keepers['update_balance']]
         if any([ts < 11 for ts in tss]):
             return # don't execute if any unfinished updates of my_trades, open_orders or balance
-
         if self.future_handling_lock.locked():
             if time() - self.time_keepers['future_handling_lock'] > self.force_lock_release_timeout:
                 self.future_handling_lock.release()
@@ -905,6 +905,7 @@ class Vwap:
                     self.prev_repay_ts[coin] = now_millis
     
                     break
+
 
         order_deletions, order_creations = \
             filter_orders(flatten(self.open_orders.values()),
