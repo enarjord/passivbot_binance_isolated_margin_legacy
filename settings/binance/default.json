@@ -1,67 +1,248 @@
 {
     "quot": "BTC",
-    "coins_long": [
-        "ADA",
-        "ATOM",
-        "BAT",
-        "BCH",
-        "BNB",
-        "DASH",
-        "EOS",
-        "ETC",
-        "ETH",
-        "IOST",
-        "IOTA",
-        "LINK",
-        "LTC",
-        "MATIC",
-        "NEO",
-        "ONT",
-        "QTUM",
-        "RVN",
-        "TRX",
-        "VET",
-        "XLM",
-        "XMR",
-        "XRP",
-        "XTZ",
-        "ZEC"
-    ],
-    "coins_shrt": [
-        "ADA",
-        "ATOM",
-        "BAT",
-        "BCH",
-        "DASH",
-        "EOS",
-        "ETC",
-        "ETH",
-        "IOST",
-        "IOTA",
-        "LINK",
-        "LTC",
-        "MATIC",
-        "NEO",
-        "ONT",
-        "QTUM",
-        "RVN",
-        "TRX",
-        "VET",
-        "XLM",
-        "XMR",
-        "XRP",
-        "XTZ",
-        "ZEC"
-    ],
-    "do_not_borrow": ["BNB"],
-    "profit_pct": 0.0025,
-    "account_equity_pct_per_trade": 0.0001,
-    "account_equity_pct_per_hour": 0.01,
     "bnb_buffer": 50.3,
     "max_memory_span_days": 120,
     "snapshot_timestamp_millis": 0,
-    "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080],
+    "ema_spans_minutes": [
+        15,
+        25,
+        40,
+        64,
+        102,
+        164,
+        263,
+        421,
+        675,
+        1080
+    ],
     "entry_vol_modifier_exponent": 12,
     "min_exit_cost_multiplier": 10,
-    "entry_spread": 0.002
+    "user": "default",
+    "coins": {
+        "ADA": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "ATOM": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "BAT": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "BCH": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "BNB": {
+            "long": true,
+            "shrt": false,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": false
+        },
+        "DASH": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "EOS": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "ETC": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "ETH": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "IOST": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "IOTA": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "LINK": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "LTC": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "MATIC": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "NEO": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "ONT": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "QTUM": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "RVN": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "TRX": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "VET": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "XLM": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "XMR": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "XRP": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "XTZ": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        },
+        "ZEC": {
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0005,
+            "account_equity_pct_per_trade": 0.0001,
+            "entry_spread": 0.002,
+            "profit_pct": 0.0025,
+            "borrow": true
+        }
+    }
 }
