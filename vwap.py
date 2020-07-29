@@ -17,33 +17,41 @@ class Vwap:
         self.cm = commons
         self.cc = commons.cc
         self.settings = settings
-        self.settings['profit_pct_plus'] = (1 + settings['profit_pct'])
-        self.settings['profit_pct_minus'] = (1 - settings['profit_pct'])
+        self.quot = settings['quot']
+        self.profit_pct_plus = {f'{c}/{self.quot}': (1 + settings['coins'][c]['profit_pct'])
+                                for c in settings['coins']}
+        self.profit_pct_minus = {f'{c}/{self.quot}': (1 - settings['coins'][c]['profit_pct'])
+                                 for c in settings['coins']}
         self.settings['max_memory_span_millis'] = \
             settings['max_memory_span_days'] * 1000 * 60 * 60 * 24
-        self.settings['entry_spread_plus'] = 1 + settings['entry_spread'] / 2
-        self.settings['entry_spread_minus'] = 1 - settings['entry_spread'] / 2
-        self.account_equity_pct_per_symbol_per_hour = \
-            settings['account_equity_pct_per_hour'] / len(settings['symbols'])
+        self.entry_spread_plus = {f'{c}/{self.quot}': (1 + settings['coins'][c]['entry_spread'] / 2)
+                                  for c in settings['coins']}
+        self.entry_spread_minus = {f'{c}/{self.quot}': (1 - settings['coins'][c]['entry_spread'] / 2)
+                                   for c in settings['coins']}
+        self.account_equity_pct_per_hour = \
+            {f'{c}/{self.quot}': settings['coins'][c]['account_equity_pct_per_hour']
+             for c in settings['coins']}
+        self.account_equity_pct_per_trade = \
+            {f'{c}/{self.quot}': settings['coins'][c]['account_equity_pct_per_trade']
+             for c in settings['coins']}
         self.HOUR_TO_MILLIS = 60 * 60 * 1000
         self.user = settings['user']
         self.symbols = settings['symbols']
         self.symbols_set = set(self.symbols)
-        self.coins = settings['coins']
-        self.quot = settings['quot']
+        self.coins = set(settings['coins'])
         self.all_coins_set = set(list(self.coins) + [self.quot])
-        self.active_coins_set = set(settings['coins_long'] + settings['coins_shrt'] + [self.quot])
+        self.active_coins_set = set([c for c in settings['coins']
+                                     if settings['coins'][c]['long']
+                                     or settings['coins'][c]['shrt']] + [self.quot])
         self.symbol_split = {symbol: symbol.split('/') for symbol in self.cc.markets}
-        self.do_shrt_sel = {symbol for symbol in self.symbols
-                            if self.symbol_split[symbol][0] in settings['coins_shrt']}
-        self.do_long_buy = {symbol for symbol in self.symbols
-                            if self.symbol_split[symbol][0] in settings['coins_long']}
-        self.do_liquidate = {symbol for symbol in self.symbols
-                             if self.symbol_split[symbol][0] in settings['coins_liquidate']}
-        self.do_shrt_buy = {symbol for symbol in self.symbols if symbol not in self.do_liquidate}
-        self.do_long_sel = {symbol for symbol in self.symbols if symbol not in self.do_liquidate}
+        self.do_shrt = {f'{c}/{self.quot}'
+                        for c in settings['coins'] if settings['coins'][c]['shrt']}
+        self.do_long = {f'{c}/{self.quot}'
+                        for c in settings['coins'] if settings['coins'][c]['long']}
+        self.do_liquidate = {c for c in settings['coins'] if not any([settings['coins'][c][key]
+                                                                      for key in ['long', 'shrt']])}
         self.do_borrow = {coin for coin in self.all_coins_set
-                          if coin not in settings['do_not_borrow'] + settings['coins_liquidate']}
+                          if coin not in settings['coins'] or settings['coins'][coin]['borrow']}
         self.nodash_to_dash_map = {symbol.replace('/', ''): symbol for symbol in self.symbol_split}
         self.balance = {}
         self.my_trades = {}
@@ -103,13 +111,14 @@ class Vwap:
 
     def init(self):
         self.update_balance()
-        assert not any([cl in self.do_long_buy | self.do_shrt_sel for cl in self.do_liquidate])
+        assert not any([f'{c_}/{self.quot}' in self.do_long | self.do_shrt
+                        for c_ in self.do_liquidate])
         calls = []
         for i, s in enumerate(self.symbols):
             coin, quot = self.symbol_split[s]
             entry_cost_default = max(self.min_trade_costs[s],
                                      (self.balance[quot]['account_equity'] *
-                                      self.settings['account_equity_pct_per_trade']))
+                                      self.account_equity_pct_per_trade[s]))
             entry_cost = max(10**-self.amount_precisions[s] * self.cm.last_price[s],
                              entry_cost_default)
             self.d[s]['entry_cost'] = entry_cost
@@ -386,11 +395,11 @@ class Vwap:
             entry_exit_amount_threshold
         )
         analysis['long_sel_price'] = round_up(
-            analysis['true_long_vwap'] * self.settings['profit_pct_plus'],
+            analysis['true_long_vwap'] * self.profit_pct_plus[s],
             self.price_precisions[s]
         )
         analysis['shrt_buy_price'] = round_dn(
-            analysis['true_shrt_vwap'] * self.settings['profit_pct_minus'],
+            analysis['true_shrt_vwap'] * self.profit_pct_minus[s],
             self.price_precisions[s]
         )
         self.my_trades[s] = my_trades_cropped
@@ -565,25 +574,25 @@ class Vwap:
 
         entry_cost_default = max(self.min_trade_costs[s],
                                  (self.balance[quot]['account_equity'] *
-                                  self.settings['account_equity_pct_per_trade']))
+                                  self.account_equity_pct_per_trade[s]))
         entry_cost = max(10**-self.amount_precisions[s] * self.cm.last_price[s], entry_cost_default)
 
         self.d[s]['entry_cost'] = entry_cost
         self.d[s]['min_exit_cost'] = entry_cost * self.settings['min_exit_cost_multiplier']
         long_entry_delay_millis = \
-            self.HOUR_TO_MILLIS / (self.account_equity_pct_per_symbol_per_hour /
+            self.HOUR_TO_MILLIS / (self.account_equity_pct_per_hour[s] /
                                    max(8e-8, min(self.my_trades_analyses[s]['last_long_entry_cost'],
                                                  entry_cost)))
         shrt_entry_delay_millis = \
-            self.HOUR_TO_MILLIS / (self.account_equity_pct_per_symbol_per_hour /
+            self.HOUR_TO_MILLIS / (self.account_equity_pct_per_hour[s] /
                                    max(8e-8, min(self.my_trades_analyses[s]['last_shrt_entry_cost'],
                                                  entry_cost)))
         # set ideal orders
         exponent = self.settings['entry_vol_modifier_exponent']
         now_millis = self.cc.milliseconds()
-        if s in self.do_shrt_sel:
+        if s in self.do_shrt:
             shrt_sel_price = max([
-                round_up(self.cm.max_ema[s] * self.settings['entry_spread_plus'],
+                round_up(self.cm.max_ema[s] * self.entry_spread_plus[s],
                          self.price_precisions[s]),
                 other_bid_incr,
                 (other_ask_decr if entry_cost / other_ask_decr < lowest_other_ask['amount']
@@ -608,9 +617,9 @@ class Vwap:
                            shrt_sel_price >= self.min_trade_costs[s] else 0.0),
                 'price': shrt_sel_price
             }
-        if s in self.do_long_buy:
+        if s in self.do_long:
             long_buy_price = min([
-                round_dn(self.cm.min_ema[s] * self.settings['entry_spread_minus'],
+                round_dn(self.cm.min_ema[s] * self.entry_spread_minus[s],
                          self.price_precisions[s]),
                 other_ask_decr,
                 (other_bid_incr if entry_cost / other_bid_incr < highest_other_bid['amount']
@@ -635,7 +644,7 @@ class Vwap:
                            long_buy_price >= self.min_trade_costs[s] else 0.0),
                 'price': long_buy_price
             }
-        if s in self.do_shrt_buy:
+        if s in self.do_shrt:
             shrt_buy_amount = round_up(self.my_trades_analyses[s]['true_shrt_amount'],
                                        self.amount_precisions[s])
             self.ideal_shrt_buy[s] = {
@@ -647,7 +656,7 @@ class Vwap:
                                else highest_other_bid['price']),
                               self.my_trades_analyses[s]['shrt_buy_price']])
             }
-        if s in self.do_long_sel:
+        if s in self.do_long:
             long_sel_amount = round_up(self.my_trades_analyses[s]['true_long_amount'],
                                        self.amount_precisions[s])
             self.ideal_long_sel[s] = {
@@ -659,10 +668,10 @@ class Vwap:
                                else lowest_other_ask['price']),
                               self.my_trades_analyses[s]['long_sel_price']])
             }
-        if s in self.do_liquidate:
+        if coin in self.do_liquidate:
             liqui_cost = max(self.min_trade_costs[s],
                              (self.balance[quot]['account_equity'] *
-                              self.settings['account_equity_pct_per_trade'] * 10))
+                              self.account_equity_pct_per_trade[s] * 10))
             bid_price = min([
                 round_dn(self.cm.min_ema[s], self.price_precisions[s]),
                 other_ask_decr,
@@ -715,12 +724,12 @@ class Vwap:
             [{**{'symbol': s_,
                  'lp_diff': (self.cm.last_price[s_] / self.ideal_long_buy[s_]['price'])},
               **self.ideal_long_buy[s_]} for s_ in self.ideal_long_buy
-             if s_ in self.do_long_buy and self.ideal_long_buy[s_]['amount'] > 0.0]
+             if s_ in self.do_long and self.ideal_long_buy[s_]['amount'] > 0.0]
         shrt_sels = \
             [{**{'symbol': s_,
                  'lp_diff': (self.ideal_shrt_sel[s_]['price'] / self.cm.last_price[s_])},
               **self.ideal_shrt_sel[s_]} for s_ in self.ideal_shrt_sel
-             if s_ in self.do_shrt_sel and self.ideal_shrt_sel[s_]['amount'] > 0.0]
+             if s_ in self.do_shrt and self.ideal_shrt_sel[s_]['amount'] > 0.0]
         entries = sorted(long_buys + shrt_sels, key=lambda x: x['lp_diff'])
         eligible_entries = []
         for entry in entries:
