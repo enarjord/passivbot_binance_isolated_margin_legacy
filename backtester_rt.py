@@ -158,8 +158,8 @@ def backtest(df: pd.DataFrame, settings: dict):
     fee = 1 - settings['fee']
     margin = settings['margin'] - 1
     exponent = settings['entry_vol_modifier_exponent']
-    max_multiplier = settings['min_exit_cost_multiplier'] - 1
-    max_cost_per_symbol_per_hour = settings['account_equity_pct_per_hour'] / len(symbols)
+    max_multiplier = settings['min_exit_cost_multiplier'] / 2
+    account_equity_pct_per_symbol_per_hour = settings['account_equity_pct_per_hour'] / len(symbols)
     millis_wait_until_next_long_entry = {s: 0 for s in symbols}
     millis_wait_until_next_shrt_entry = {s: 0 for s in symbols}
 
@@ -194,7 +194,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                     if long_cost[s] > 0.0:
                         cost *= max(
                             1.0,
-                            min(max_multiplier, (long_exit_price[s] / row.price) ** exponent)
+                            min(max_multiplier / 2, (long_exit_price[s] / row.price) ** exponent)
                         )
                     cost = min(max(balance[quot], credit_avbl_quot), cost)
                     if cost >= settings['min_quot_cost']:
@@ -213,7 +213,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                  'price': max(long_exit_price[s], row.exit_price)})
                         prev_long_entry_ts[s] = row.Index
                         millis_wait_until_next_long_entry[s] = \
-                            1 / (max_cost_per_symbol_per_hour / (default_cost * hour_to_millis))
+                            1 / (account_equity_pct_per_symbol_per_hour / (default_cost * hour_to_millis))
             else:
                 if coin in coins_shrt and \
                         row.Index - prev_shrt_entry_ts[s] >= millis_wait_until_next_shrt_entry[s]:
@@ -221,7 +221,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                     if shrt_cost[s] > 0.0:
                         cost *= max(
                             1.0,
-                            min(max_multiplier, (row.price / shrt_exit_price[s]) ** exponent)
+                            min(max_multiplier / 2, (row.price / shrt_exit_price[s]) ** exponent)
                         )
                     cost = min(max(balance[quot], credit_avbl_quot), cost)
                     if cost >= settings['min_quot_cost']:
@@ -239,7 +239,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                  'price': min(shrt_exit_price[s], row.exit_price)})
                         prev_shrt_entry_ts[s] = row.Index
                         millis_wait_until_next_shrt_entry[s] = \
-                            1 / (max_cost_per_symbol_per_hour / (default_cost * hour_to_millis))
+                            1 / (account_equity_pct_per_symbol_per_hour / (default_cost * hour_to_millis))
         if row.is_buyer_maker:
             exit_price = min(row.exit_price, shrt_exit_price[s])
             if coin in coins_shrt and row.price < exit_price and \
