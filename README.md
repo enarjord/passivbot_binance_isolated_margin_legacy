@@ -50,6 +50,12 @@ run in terminal:
 
 `python3.8 passivbot.py your_user_name`
 
+
+
+backtester:
+
+open jupyter notebook in the directory and open backtester_notes_rt.ipynb to backtest
+
 ------------------------------------------------------------------
 overview
 
@@ -116,44 +122,43 @@ the size of its bids and asks scale with account equity
 
 about the settings:
 
-    "quot": "BTC",                              # the coin to accumulate, only tested with BTC
-    "coins_long": ["ADA", "ATOM", "BAT", ...]   # coins to long
-                                                # default is all margin enabled coins which have BTC as quote
-    "coins_shrt": ["ADA", "ATOM", "BAT", ...]   # coins to short
-                                                # default is all margin enabled coins, except BNB, which have BTC as quote
-                                                #
-    "profit_pct": 0.0025,                       # minimum markup per long/short exit
-                                                # eg. if over time spent total 0.01 BTC buying long a total of 200.0 coin,
-                                                # volume weighted average price is 0.01 / 200 == 0.00005
-                                                # and long sell price becomes 0.00005 * (1 + 0.0025) == 0.00005125
-                                                # inversely, if over time short sold a total of 200.0 coin for 0.01 BTC,
-                                                # volume weighted average price is still 0.00005
-                                                # and short buy price becomes 0.00005 * (1 - 0.0025) == 0.000049875
-                                                #
-    "account_equity_pct_per_trade": 0.0001,     # percentage of total account equity to spend per symbol per trade
-    "account_equity_pct_per_hour": 0.01         # max percentage of total account equity to spend per symbol per hour
-    "bnb_buffer": 50.3,                         # BNB buffer for paying fees and interest, and for vip status
-    "max_memory_span_days": 120,                # how many days past the bot will take trade history into account
-    "snapshot_timestamp_millis": 0,             # timestamp in millis from which bot will take trade history into account
-    "ema_spans_minutes": [15, 25 ... 675, 1080],# exponential moving averages used to set max bid and min ask prices
-                                                # it calculates any number of emas,
-                                                # and sets highest allowed bid = min(emas) and lowest allowed ask = max(emas)
-    "entry_vol_modifier_exponent": 12,          # entry volume is modified by the following formula:
-                                                # max_long_entry_vol *= max(
-                                                      1.0, min(settings["min_exit_cost_multiplier"] - 1,
-                                                               (long_exit_price / current_price)**entry_vol_modifier_exponent)
-                                                  )
-                                                # max_shrt_entry_vol *= max(
-                                                      1.0, min(settings["min_exit_cost_multiplier"] - 1,
-                                                               (current_price / shrt_exit_price)**entry_vol_modifier_exponent)
-                                                  )
-                                                # bigger difference between exit_price and current price gives bigger entries
-                                                # set entry_vol_modifier_exponent = 0 and there will be no entry_vol modification
-    "min_exit_cost_multiplier": 10,             # the exits are at least 10 times larger than the entries
-                                                # the entry size can be up to (10 - 1) times larger,
-                                                # modified by distance between exit price and current price
-    "entry_spread": 0.002,                      # max_bid_price = min(emas) * (1 - entry_spread / 2)
-                                                # min_ask_price = max(emas) * (1 + entry_spread / 2)
+    "quot": "BTC",                                  # the coin to accumulate, only tested with BTC
+    "coins": {
+        "ADA": {
+            "long": true,                           # do long
+            "shrt": true,                           # do short
+                                                    # if both "long" and "shrt" are false, the bot will gradually liquidate coin
+            "account_equity_pct_per_hour": 0.0005,  # max percentage of total account equity per hour to trade with this coin
+            "account_equity_pct_per_trade": 0.0001, # percentage of total account equity size of entries
+            "entry_spread": 0.002,                  # spread to be added to min and max emas, see below
+            "profit_pct": 0.0025,                   # minimum exit markup
+            "borrow": true                          # whether to borrow coin or not. BNB is set to false by default because of high interest rate
+        },
+        "ATOM" {...},
+        ...
+    }
+    "bnb_buffer": 50.3,                             # BNB buffer for paying fees and interest, and for vip status
+    "max_memory_span_days": 120,                    # how many days past the bot will take trade history into account
+    "snapshot_timestamp_millis": 0,                 # timestamp in millis from which bot will take trade history into account
+    "ema_spans_minutes": [15, 25 ... 675, 1080],    # exponential moving averages used to set max bid and min ask prices
+                                                    # it calculates any number of emas,
+                                                    # and sets highest allowed bid = min(emas) and lowest allowed ask = max(emas)
+    "entry_vol_modifier_exponent": 12,              # entry volume is modified by the following formula:
+                                                    # max_long_entry_vol *= max(
+                                                          1.0, min(settings["min_exit_cost_multiplier"] / 2,
+                                                                   (long_exit_price / current_price)**entry_vol_modifier_exponent)
+                                                      )
+                                                    # max_shrt_entry_vol *= max(
+                                                          1.0, min(settings["min_exit_cost_multiplier"] / 2,
+                                                                   (current_price / shrt_exit_price)**entry_vol_modifier_exponent)
+                                                      )
+                                                    # bigger difference between exit_price and current price gives bigger entries
+                                                    # set entry_vol_modifier_exponent = 0 and there will be no entry_vol modification
+    "min_exit_cost_multiplier": 10,                 # the exits are at least 10 times larger than the entries
+                                                    # the entry size can be up to (10 / 2) times larger,
+                                                    # modified by distance between exit price and current price
+    "entry_spread": 0.002,                          # max_bid_price = min(emas) * (1 - entry_spread / 2)
+                                                    # min_ask_price = max(emas) * (1 + entry_spread / 2)
 
 
 
@@ -167,7 +172,7 @@ by default it will long all coins and short all coins except BNB due to high int
 
 it will automatically place and delete orders, borrow and repay
 
-it will only make orders, never (except by accident due to extreme volatility or exchange latency) take orders
+it will only make orders, never (except by accident) take orders
 
 it maintains up to 4 orders per market pair
 
