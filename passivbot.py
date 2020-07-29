@@ -11,12 +11,12 @@ import json
 
 
 def load_settings(user: str):
-    default_settings = json.load(open(f'settings/binance/default.json'))
+    default_settings = json.load(open('settings/binance/default.json'))
     try:
         settings = json.load(open(f'settings/binance/{user}.json'))
-        for key in default_settings:
-            if key not in settings:
-                settings[key] = default_settings[key]
+        for k0 in default_settings:
+            if k0 not in settings:
+                settings[k0] = default_settings[k0]
     except(FileNotFoundError):
         print(f'{user} not found, using default settings')
         settings = default_settings
@@ -28,8 +28,6 @@ def prepare_bot(exchange: str, user: str):
     settings = load_settings(user)
     commons = Commons(user, settings['ema_spans_minutes'])
     all_coins = set(flatten([s.split('/') for s in commons.cc.markets]))
-    settings['coins'] = [c for c in sorted(set(settings['coins_long'] + settings['coins_shrt']))
-                         if c in all_coins]
     all_margin_pairs = [f"{e['base']}/{e['quote']}" for e in commons.cc.sapi_get_margin_allpairs()]
     settings['symbols'] = [s for c in settings['coins']
                            if (s := f"{c}/{settings['quot']}") in all_margin_pairs]
