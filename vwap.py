@@ -54,6 +54,7 @@ class Vwap:
                           if coin not in settings['coins'] or settings['coins'][coin]['borrow']}
         self.nodash_to_dash_map = {symbol.replace('/', ''): symbol for symbol in self.symbol_split}
         self.balance = {}
+        self.borrowable = {}
         self.my_trades = {}
         self.my_trades_analyses = {s: {} for s in self.symbols}
         self.ideal_long_sel = {s: {'side': 'sell', 'amount': 0.0, 'price': 0.0}
@@ -84,8 +85,8 @@ class Vwap:
         self.prev_repay_ts = {c_: 0 for c_ in self.all_coins_set}
 
         self.updating_intervals = {'update_balance': 25,
-                                   'update_open_orders': 60,
-                                   'update_my_trades': 90,
+                                   'update_open_orders': 90,
+                                   'update_my_trades': 120,
                                    'dump_balance_log': 60 * 60}
         self.time_keepers = {'update_balance': 0,
                              'update_open_orders': {symbol: 0 for symbol in self.symbols},
@@ -113,6 +114,9 @@ class Vwap:
         self.update_balance()
         assert not any([f'{c_}/{self.quot}' in self.do_long | self.do_shrt
                         for c_ in self.do_liquidate])
+        print('liquidating', self.do_liquidate)
+        print('longing', self.do_long)
+        print('shorting', self.do_shrt)
         calls = []
         for i, s in enumerate(self.symbols):
             coin, quot = self.symbol_split[s]
@@ -579,14 +583,18 @@ class Vwap:
 
         self.d[s]['entry_cost'] = entry_cost
         self.d[s]['min_exit_cost'] = entry_cost * self.settings['min_exit_cost_multiplier']
+
         long_entry_delay_millis = \
-            self.HOUR_TO_MILLIS / (self.account_equity_pct_per_hour[s] /
-                                   max(8e-8, min(self.my_trades_analyses[s]['last_long_entry_cost'],
-                                                 entry_cost)))
+            (self.HOUR_TO_MILLIS *
+             min(self.my_trades_analyses[s]['last_long_entry_cost'], entry_cost) /
+             (self.account_equity_pct_per_hour[s] *
+              self.balance[quot]['account_equity']))
         shrt_entry_delay_millis = \
-            self.HOUR_TO_MILLIS / (self.account_equity_pct_per_hour[s] /
-                                   max(8e-8, min(self.my_trades_analyses[s]['last_shrt_entry_cost'],
-                                                 entry_cost)))
+            (self.HOUR_TO_MILLIS *
+             min(self.my_trades_analyses[s]['last_shrt_entry_cost'], entry_cost) /
+             (self.account_equity_pct_per_hour[s] *
+              self.balance[quot]['account_equity']))
+
         # set ideal orders
         exponent = self.settings['entry_vol_modifier_exponent']
         now_millis = self.cc.milliseconds()
@@ -670,8 +678,7 @@ class Vwap:
             }
         if coin in self.do_liquidate:
             liqui_cost = max(self.min_trade_costs[s],
-                             (self.balance[quot]['account_equity'] *
-                              self.account_equity_pct_per_trade[s] * 10))
+                             self.d[s]['min_exit_cost'] / 2)
             bid_price = min([
                 round_dn(self.cm.min_ema[s], self.price_precisions[s]),
                 other_ask_decr,
@@ -777,7 +784,7 @@ class Vwap:
         for exit in exits:
             s_ = exit['symbol']
             c_, q_ = self.symbol_split[s_]
-            if exit['lp_diff'] == 0.0 or exit['lp_diff'] > 1.05:
+            if exit['lp_diff'] == 0.0 or exit['lp_diff'] > 1.1:
                 continue
             if exit['side'] == 'sell':
                 if (diff := exit['amount'] - coin_available[c_]) > 0.0:
