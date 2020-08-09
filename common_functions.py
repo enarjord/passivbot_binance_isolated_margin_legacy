@@ -1,6 +1,8 @@
 from math import ceil, floor
 import datetime
+import re
 from typing import Callable
+import numpy as np
 
 
 def ts_to_date(timestamp: float) -> str:
@@ -15,15 +17,19 @@ def flatten(lst: list) -> list:
 
 
 def round_up(n: float, d: int = 0):
-    return ceil(n * 10**d) / (10**d)
-
-
-def round_down(n: float, d: int = 0):
-    return floor(n * 10**d) / (10**d)
+    try:
+        iter(n)
+        return np.ceil(n * 10**d) / 10**d
+    except:
+        return ceil(n * 10**d) / (10**d)
 
 
 def round_dn(n: float, d: int = 0):
-    return floor(n * 10**d) / (10**d)
+    try:
+        iter(n)
+        return np.floor(n * 10**d) / 10**d
+    except:
+        return floor(n * 10**d) / (10**d)
 
 
 def increment_by_precision(val: float, precision: float) -> float:
@@ -130,3 +136,13 @@ def partition_sorted(lst: list, condition: Callable):
         if condition(lst[i]):
             return lst[:i], lst[i:]
     return lst, []
+
+
+def format_float(num, rounding: int = -1):
+    return np.format_float_positional(num if rounding == -1 else round(num, rounding), trim='-')
+
+
+def multiple_replace(string: str, rep_dict: dict) -> str:
+    pattern = re.compile("|".join([re.escape(k) for k in sorted(rep_dict, key=len, reverse=True)]),
+                         flags=re.DOTALL)
+    return pattern.sub(lambda x: rep_dict[x.group(0)], string)
