@@ -187,7 +187,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                  'price': max(long_exit_price[s], row.exit_price)})
                         prev_long_entry_ts[s] = row.Index
                         millis_wait_until_next_long_entry[s] = (default_cost * hour_to_millis) / \
-                            account_equity_pct_per_symbol_per_hour[coin]
+                            (account_equity_pct_per_symbol_per_hour[coin] * acc_equity_quot)
             else:
                 if coin in coins_shrt and \
                         row.Index - prev_shrt_entry_ts[s] >= millis_wait_until_next_shrt_entry[s]:
@@ -214,7 +214,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                  'price': min(shrt_exit_price[s], row.exit_price)})
                         prev_shrt_entry_ts[s] = row.Index
                         millis_wait_until_next_shrt_entry[s] = (default_cost * hour_to_millis) / \
-                            account_equity_pct_per_symbol_per_hour[coin]
+                            (account_equity_pct_per_symbol_per_hour[coin] * acc_equity_quot)
         if row.is_buyer_maker:
             exit_price = min(row.exit_price, shrt_exit_price[s])
             if coin in coins_shrt and row.price < exit_price and \
