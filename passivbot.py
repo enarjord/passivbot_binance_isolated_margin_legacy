@@ -436,11 +436,10 @@ class Bot:
             return False
 
     def finished_executing(self, key0: str, key1: str = None):
-        now = time()
         if key1 is None:
-            self.timestamps['released'][key0] = now
+            self.timestamps['released'][key0] = time()
         else:
-            self.timestamps['released'][key0][key1] = now
+            self.timestamps['released'][key0][key1] = time()
 
     def consume_quota(self):
         now = time()
@@ -501,6 +500,9 @@ class Bot:
                     asyncio.create_task(self.update_borrowable(c))
         self.margin_balance = new_balance
         self.dump_item(new_balance, 'margin_balance')
+        if (now := time()) - self.timestamps['dump_balance_log'] > 60 * 60:
+            self.dump_balance_log()
+            self.timestamps['dump_balance_log'] = now
         self.finished_executing('update_margin_balance')
 
     def dump_item(self, item: dict, key0: str, key1: str = None):
@@ -640,15 +642,6 @@ class Bot:
         self.margin_my_trades[symbol] = my_trades_cropped
         self.finished_executing('update_margin_my_trades', symbol)
 
-    def print_order_book(self):
-        line = 'hbid '
-        for s in self.symbols:
-            line += f"{s:11} {self.order_book[s]['bids'][-1]['price']:12} "
-        line += 'lask '
-        for s in self.symbols:
-            line += f"{s:11} {self.order_book[s]['asks'][0]['price']:12} "
-        print(line)
-
     def on_update(self, s: str):
         if self.order_book[s]['bids'][-1]['price'] != self.prev_order_book[s]['bids'][-1]['price']:
             #self.print_order_book()
@@ -729,10 +722,6 @@ class Bot:
             return
         if not self.can_execute('execute_to_exchange'):
             return
-
-        if now - self.timestamps['dump_balance_log'] > 60 * 60:
-            self.dump_balance_log()
-            self.timestamps['dump_balance_log'] = now
 
         for s in self.symbols:
             self.set_ideal_margin_orders(s)
