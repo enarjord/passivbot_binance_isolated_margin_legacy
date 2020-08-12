@@ -197,7 +197,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                             1.0,
                             min(max_multiplier / 2, (row.price / shrt_exit_price[s]) ** exponent)
                         )
-                    cost = min(max(balance[quot], credit_avbl_quot), cost)
+                    cost = min(max(balance[coin] * row.entry_price, credit_avbl_quot), cost)
                     if cost >= settings['min_quot_cost']:
                         amount = cost / row.entry_price
                         balance[coin] -= amount
@@ -244,7 +244,9 @@ def backtest(df: pd.DataFrame, settings: dict):
                     if shrt_amount[s] <= 0.0 or shrt_cost[s] <= 0.0:
                         shrt_amount[s], shrt_cost[s], shrt_exit_price[s] = 0.0, 0.0, row.price
                     else:
-                        shrt_exit_price[s] = shrt_cost[s] / shrt_amount[s]
+                        shrt_exit_price[s] = round_dn(
+                            (shrt_cost[s] / shrt_amount[s]) * ppctminus[s], precisions[s]
+                        )
         else:
             exit_price = max(row.exit_price, long_exit_price[s])
             if coin in coins_long and row.price > exit_price and \
@@ -309,8 +311,7 @@ def backtest(df: pd.DataFrame, settings: dict):
             line += f'acc equity quot: {acc_equity_quot:.6f}  '
             line += f"avg daily gain: {(acc_equity_quot / settings['start_quot'])**(1/n_days):6f} "
             line += f'cost {default_cost:.8f} margin_level {margin_level:.4f} '
-            line += str(sorted([(round(millis_wait_until_next_long_entry[k] / 1000, 2), k)
-                                for k in millis_wait_until_next_long_entry]))
+            line += f'credit_avbl_quot {credit_avbl_quot:.6f} '
             sys.stdout.write(line)
             sys.stdout.flush()
 
