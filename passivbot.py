@@ -183,6 +183,7 @@ class ABinance:
 
 
 async def create_bot(settings: dict):
+    '''
     if 'BNB' not in settings['coins']:
         settings['coins']['BNB'] = {
             'long': False,
@@ -193,6 +194,7 @@ async def create_bot(settings: dict):
             'entry_spread': 0.001,
             'profit_pct': 0.005,
         }
+    '''
     bot = Bot(settings)
     await bot._init()
     return bot
@@ -265,7 +267,8 @@ class Bot:
         now = time()
         self.timestamps = {'locked': {'execute_to_exchange': now, 'update_margin_balance': now},
                            'released': {'execute_to_exchange': now + 1,
-                                        'update_margin_balance': now + 1}}
+                                        'update_margin_balance': now + 1},
+                           'dump_balance_log': 0}
         for key0 in ['update_borrowable', 'borrow', 'repay']:
             self.timestamps['locked'][key0], self.timestamps['released'][key0] = {}, {}
             for key1 in sorted(self.all_coins):
@@ -727,6 +730,10 @@ class Bot:
         if not self.can_execute('execute_to_exchange'):
             return
 
+        if now - self.timestamps['dump_balance_log'] > 60 * 60:
+            self.dump_balance_log()
+            self.timestamps['dump_balance_log'] = now
+
         for s in self.symbols:
             self.set_ideal_margin_orders(s)
         entries, exits, borrows, repays = self.allocate_credit()
@@ -966,10 +973,8 @@ class Bot:
         credit_available = {c: self.margin_balance[c]['borrowable'] for c in self.all_coins}
         max_credit_avbl_quot = max([self.convert_amount(credit_available[c], c, self.quot)
                                     for c in credit_available])
-
         borrows = {c: 0.0 for c in self.all_coins}
         coin_available = {c: self.margin_balance[c]['onhand'] for c in self.all_coins}
-
         long_buys, shrt_sels = [], []
         entries = []
         for s in self.longs:
@@ -1035,7 +1040,6 @@ class Bot:
                             max_credit_avbl_quot -= borrow_amount
                             credit_available[q] = 0.0
                             borrows[q] += borrow_amount
-
         exits = []
         for s in self.longs:
             if self.settings['coins'][self.s2c[s]]['long'] and \
@@ -1098,10 +1102,11 @@ class Bot:
                               self.amount_precisions[s] + 1),
                         self.amount_precisions[s]
                     )
-                    if partial_amount * exit['price'] >= self.limits[s]['min_exit_cost']:
+                    partial_cost = partial_amount * exit['price']
+                    if partial_cost >= self.limits[s]['min_exit_cost']:
                         exit['amount'] = partial_amount
                         eligible_exits.append(exit)
-                        coin_available[q] += borrow_amount - partial_amount * exit['price']
+                        coin_available[q] += borrow_amount - partial_cost
                         credit_available[q] -= borrow_amount
                         max_credit_avbl_quot -= borrow_amount
                         borrows[q] += borrow_amount
@@ -1113,9 +1118,9 @@ class Bot:
                                  self.amount_precisions[s]),
                         round_dn(coin_available[q] / exit['price'], self.amount_precisions[s])
                     )
+                    exit_cost = exit['amount'] * exit['price']
                     eligible_exits.append(exit)
                     coin_available[q] -= exit_cost
-
         for s in self.liquis:
             c, q = self.symbol_split[s]
             lb = self.ideal_orders[s]['liqui_buy']
@@ -1132,7 +1137,6 @@ class Bot:
         eligible_borrows, eligible_repays = [], []
         for c in borrows:
             borrows[c] -= min(self.margin_balance[c]['debt'], coin_available[c])
-
             borrow_amount = round(min(borrows[c], self.margin_balance[c]['borrowable']), 8)
             if c in self.borrows:
                 if borrow_amount > 0.0:
