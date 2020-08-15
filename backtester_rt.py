@@ -157,8 +157,6 @@ def backtest(df: pd.DataFrame, settings: dict):
             settings['min_quot_cost']
         )
         credit_avbl_quot = max(0.0, acc_equity_quot * margin - acc_debt_quot)
-        # bag_size_over_acc_equity = \
-        #     sum([abs(v) for v in balance_ito_quot.values()]) / acc_equity_quot
 
         if row.entry:
             if row.is_buyer_maker:
@@ -170,8 +168,11 @@ def backtest(df: pd.DataFrame, settings: dict):
                             1.0,
                             min(max_multiplier, (long_exit_price[s] / row.price) ** exponent)
                         )
-                    cost = min(max(0.0, balance[quot]) + credit_avbl_quot, cost)
+                    quot_avbl = max(0.0, balance[quot])
+                    borrow_amount = max(0.0, min(cost - quot_avbl, credit_avbl_quot))
+                    cost = min(quot_avbl + borrow_amount, cost)
                     if cost >= settings['min_quot_cost']:
+                        credit_avbl_quot -= borrow_amount
                         amount = cost / row.entry_price
                         balance[quot] -= cost
                         balance[coin] += amount * fee
@@ -197,8 +198,11 @@ def backtest(df: pd.DataFrame, settings: dict):
                             1.0,
                             min(max_multiplier, (row.price / shrt_exit_price[s]) ** exponent)
                         )
-                    cost = min(max(0.0, balance[coin] * row.entry_price) + credit_avbl_quot, cost)
+                    coin_avbl_quot = max(0.0, balance[coin]) * row.entry_price
+                    borrow_amount_quot = max(0.0, min(cost - coin_avbl_quot, credit_avbl_quot))
+                    cost = min(coin_avbl_quot + borrow_amount_quot, cost)
                     if cost >= settings['min_quot_cost']:
+                        credit_avbl_quot -= borrow_amount_quot
                         amount = cost / row.entry_price
                         balance[coin] -= amount
                         balance[quot] += cost * fee
@@ -219,28 +223,22 @@ def backtest(df: pd.DataFrame, settings: dict):
             exit_price = min(row.exit_price, shrt_exit_price[s])
             exit_cost = shrt_amount[s] * exit_price
             min_exit_cost = default_cost * settings['min_exit_cost_multiplier']
-
-            if coin in coins_shrt and row.price < exit_price and shrt_cost[s] >= exit_cost:
-                quot_avbl = credit_avbl_quot + max(0.0, balance[quot])
-                if quot_avbl >= exit_cost:
-                    # full exit
+            if coin in coins_shrt and row.price < exit_price and exit_cost >= min_exit_cost:
+                quot_avbl = max(0.0, balance[quot])
+                borrow_amount = max(0.0, min(exit_cost - quot_avbl, credit_avbl_quot))
+                exit_cost = min(quot_avbl + borrow_amount, exit_cost)
+                if exit_cost >= min_exit_cost:
                     balance[quot] -= exit_cost
-                    balance[coin] += shrt_amount[s] * fee
+                    exit_amount = exit_cost / exit_price
+                    balance[coin] += exit_amount * fee
                     exits_list.append({'symbol': s, 'timestamp': row.Index, 'side': 'buy',
-                                       'amount': shrt_amount[s], 'price': exit_price,
+                                       'amount': exit_amount, 'price': exit_price,
                                        'cost': exit_cost})
-                    shrt_amount[s], shrt_cost[s], shrt_exit_price[s] = 0.0, 0.0, row.price
-                else:
-                    if quot_avbl > min_exit_cost:
-                        # partial exit
-                        balance[quot] -= quot_avbl
-                        coin_bought = quot_avbl / exit_price
-                        balance[coin] += coin_bought * fee
-                        exits_list.append({'symbol': s, 'timestamp': row.Index, 'side': 'buy',
-                                           'amount': coin_bought, 'price': exit_price,
-                                           'cost': quot_avbl})
-                        shrt_amount[s] -= coin_bought
-                        shrt_cost[s] -= quot_avbl
+                    shrt_amount[s] -= exit_amount
+                    shrt_cost[s] -= exit_cost
+                    if shrt_amount[s] <= 0.0 or shrt_cost[s] <= 0.0:
+                        shrt_amount[s], shrt_cost[s], shrt_exit_price[s] = 0.0, 0.0, row.price
+                    else:
                         shrt_exit_price[s] = round_dn(
                             (shrt_cost[s] / shrt_amount[s]) * ppctminus[s],
                             precisions[s]
@@ -249,28 +247,22 @@ def backtest(df: pd.DataFrame, settings: dict):
             exit_price = max(row.exit_price, long_exit_price[s])
             exit_cost = long_amount[s] * exit_price
             min_exit_cost = default_cost * settings['min_exit_cost_multiplier']
-            if coin in coins_long and row.price > exit_price and exit_cost > min_exit_cost:
-                credit_avbl_coin = \
-                    max(0.0, acc_equity_quot * margin - acc_debt_quot) / row.price
-                coin_available = credit_avbl_coin + max(0.0, balance[coin])
-                if coin_available >= long_amount[s]:
-                    balance[coin] -= long_amount[s]
-                    exit_cost = long_amount[s] * exit_price
+            if coin in coins_long and row.price > exit_price and exit_cost >= min_exit_cost:
+                coin_avbl_quot = max(0.0, balance[coin]) * exit_price
+                borrow_amount_quot = max(0.0, min(exit_cost - coin_avbl_quot, credit_avbl_quot))
+                exit_cost = min(coin_avbl_quot + borrow_amount_quot, exit_cost)
+                if exit_cost >= min_exit_cost:
+                    exit_amount = exit_cost / exit_price
+                    balance[coin] -= exit_amount
                     balance[quot] += exit_cost * fee
                     exits_list.append({'symbol': s, 'timestamp': row.Index, 'side': 'sell',
-                                       'amount': long_amount[s], 'price': exit_price,
+                                       'amount': exit_amount, 'price': exit_price,
                                        'cost': exit_cost})
-                    long_amount[s], long_cost[s], long_exit_price[s] = 0.0, 0.0, row.price
-                else:
-                    if coin_available * exit_price > min_exit_cost:
-                        balance[coin] -= coin_available
-                        exit_cost = coin_available * exit_price
-                        balance[quot] += exit_cost * fee
-                        exits_list.append({'symbol': s, 'timestamp': row.Index, 'side': 'sell',
-                                           'amount': coin_available, 'price': exit_price,
-                                           'cost': exit_cost})
-                        long_amount[s] -= coin_available
-                        long_cost[s] -= exit_cost
+                    long_amount[s] -= exit_amount
+                    long_cost[s] -= exit_cost
+                    if long_amount[s] <= 0.0 or long_cost[s] <= 0.0:
+                        long_amount[s], long_cost[s], long_exit_price[s] = 0.0, 0.0, row.price
+                    else:
                         long_exit_price[s] = round_up((long_cost[s] / long_amount[s]) * ppctplus[s],
                                                       precisions[s])
 
@@ -291,6 +283,8 @@ def backtest(df: pd.DataFrame, settings: dict):
 
         k += 1
         if k % 5000 == 0:
+            acc_equity_quot = sum(balance_ito_quot.values())
+            acc_debt_quot = -sum([min(0.0, v) for v in balance_ito_quot.values()])
             n_millis = row.Index - start_ts
             n_days = n_millis / 1000 / 60 / 60 / 24
             avg_daily_gain = (acc_equity_quot / settings['start_quot'])**(1/n_days)
@@ -304,8 +298,9 @@ def backtest(df: pd.DataFrame, settings: dict):
             line += f'n_days {n_days:.2f} '
             line += f'acc equity quot: {acc_equity_quot:.6f}  '
             line += f"avg daily gain: {avg_daily_gain:6f} "
-            line += f'cost {default_cost:.8f} margin_level {margin_level:.4f} '
+            line += f'cost {default_cost:.8f} '
             line += f'credit_avbl_quot {credit_avbl_quot:.6f} '
+            line += f'margin_level {margin_level:.4f} '
             sys.stdout.write(line)
             sys.stdout.flush()
 
