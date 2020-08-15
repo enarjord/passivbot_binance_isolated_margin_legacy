@@ -183,18 +183,6 @@ class ABinance:
 
 
 async def create_bot(settings: dict):
-    '''
-    if 'BNB' not in settings['coins']:
-        settings['coins']['BNB'] = {
-            'long': False,
-            'shrt': False,
-            'borrow': False,
-            'account_equity_pct_per_hour': 0.003,
-            'account_equity_pct_per_trade': 0.003,
-            'entry_spread': 0.001,
-            'profit_pct': 0.005,
-        }
-    '''
     bot = Bot(settings)
     await bot._init()
     return bot
@@ -230,7 +218,12 @@ class Bot:
         self.last_price = {}
 
         self.limits = defaultdict(dict)
-        self.ideal_orders = defaultdict(dict)
+        self.ideal_orders = \
+            {s: {'shrt_sel': {'symbol': s, 'side': 'sel', 'amount': 0.0, 'price': 0.0},
+                 'shrt_buy': {'symbol': s, 'side': 'buy', 'amount': 0.0, 'price': 0.0},
+                 'long_buy': {'symbol': s, 'side': 'buy', 'amount': 0.0, 'price': 0.0},
+                 'long_sel': {'symbol': s, 'side': 'sel', 'amount': 0.0, 'price': 0.0},}
+             for s in self.symbols}
 
         self.depth_levels = 5
         self.symbol_formatting_map = {
@@ -754,11 +747,11 @@ class Bot:
         for oc in order_creations[:n_orders]:
             if oc['side'] == 'buy':
                 future_results.append(asyncio.create_task(
-                    self.create_margin_bid(oc['symbol'], oc['amount'], oc['price'], block=False)
+                    self.create_margin_bid(oc['symbol'], oc['amount'], oc['price'], block=True)
                 ))
             else:
                 future_results.append(asyncio.create_task(
-                    self.create_margin_ask(oc['symbol'], oc['amount'], oc['price'], block=False)
+                    self.create_margin_ask(oc['symbol'], oc['amount'], oc['price'], block=True)
                 ))
         await asyncio.gather(*future_results)
         self.finished_executing('execute_to_exchange')
@@ -848,15 +841,26 @@ class Bot:
                      min(self.margin_my_trades_analyses[s]['last_shrt_entry_cost'], entry_cost) /
                      (self.account_equity_pct_per_hour[s] *
                       self.margin_balance[quot]['account_equity'])):
-                shrt_sel_amount = entry_cost * shrt_amount_modifier / shrt_sel_price
+                shrt_sel_amount = round_up(entry_cost * shrt_amount_modifier / shrt_sel_price,
+                                           self.amount_precisions[s])
             else:
                 shrt_sel_amount = 0.0
-            self.ideal_orders[s]['shrt_sel'] = {
-                'symbol': s, 'side': 'sell',
-                'amount': (ssar if (ssar := round_up(shrt_sel_amount, self.amount_precisions[s])) *
-                           shrt_sel_price >= self.min_trade_costs[s] else 0.0),
-                'price': shrt_sel_price
-            }
+            if shrt_sel_amount * shrt_sel_price >= self.min_trade_costs[s]:
+                if shrt_sel_price != self.ideal_orders[s]['shrt_sel']['price'] or \
+                        (round(shrt_sel_amount - 10**-self.amount_precisions[s],
+                               self.amount_precisions[s]) !=
+                         self.ideal_orders[s]['shrt_sel']['amount']):
+                    self.ideal_orders[s]['shrt_sel'] = {
+                        'symbol': s, 'side': 'sell',
+                        'amount': shrt_sel_amount,
+                        'price': shrt_sel_price
+                    }
+            else:
+                self.ideal_orders[s]['shrt_sel'] = {
+                    'symbol': s, 'side': 'sell',
+                    'amount': 0.0,
+                    'price': shrt_sel_price
+                }
             shrt_buy_amount = round_up(self.margin_my_trades_analyses[s]['shrt_amount'],
                                        self.amount_precisions[s])
             self.ideal_orders[s]['shrt_buy'] = {
@@ -889,15 +893,26 @@ class Bot:
                      min(self.margin_my_trades_analyses[s]['last_long_entry_cost'], entry_cost) /
                      (self.account_equity_pct_per_hour[s] *
                       self.margin_balance[quot]['account_equity'])):
-                long_buy_amount = entry_cost * long_amount_modifier / long_buy_price
+                long_buy_amount = round_up(entry_cost * long_amount_modifier / long_buy_price,
+                                           self.amount_precisions[s])
             else:
                 long_buy_amount = 0.0
-            self.ideal_orders[s]['long_buy'] = {
-                'symbol': s, 'side': 'buy',
-                'amount': (lbar if (lbar := round_up(long_buy_amount, self.amount_precisions[s])) *
-                           long_buy_price >= self.min_trade_costs[s] else 0.0),
-                'price': long_buy_price
-            }
+            if long_buy_price * long_buy_amount >= self.min_trade_costs[s]:
+                if long_buy_price != self.ideal_orders[s]['long_buy']['price'] or \
+                        (round(long_buy_amount - 10**-self.amount_precisions[s],
+                               self.amount_precisions[s]) !=
+                         self.ideal_orders[s]['long_buy']['amount']):
+                    self.ideal_orders[s]['long_buy'] = {
+                        'symbol': s, 'side': 'buy',
+                        'amount': long_buy_amount,
+                        'price': long_buy_price
+                    }
+            else:
+                self.ideal_orders[s]['long_buy'] = {
+                    'symbol': s, 'side': 'buy',
+                    'amount': 0.0,
+                    'price': long_buy_price
+                }
             long_sel_amount = round_up(self.margin_my_trades_analyses[s]['long_amount'],
                                        self.amount_precisions[s])
             self.ideal_orders[s]['long_sel'] = {
@@ -953,6 +968,10 @@ class Bot:
                                                      'price': 0.0}
             if repay_amount > 0.0:
                 self.ideal_orders[s]['repay'] = repay_amount
+        if 'BNB' not in self.settings['coins']:
+            bnb_missing = self.settings['bnb_buffer'] - \
+                ((self.margin_balance['BNB']['free'] +
+                  self.margin_balance['BNB']['used']) if 'BNB' in self.margin_balance else 0.0)
 
     def allocate_credit(self) -> ([dict], [dict], [dict]):
         # allocate credit and select eligible orders
@@ -1063,7 +1082,7 @@ class Bot:
                                          max_credit_avbl_quot / exit['price'],
                                          exit['amount'] - coin_available[c]])
                     partial_amount = round_dn(round(borrow_amount + coin_available[c],
-                                                    self.amount_precisions[s] + 1),
+                                                    self.amount_precisions[s] + 2),
                                               self.amount_precisions[s])
                     if partial_amount * exit['price'] >= self.limits[s]['min_exit_cost']:
                         # partial exit
@@ -1088,7 +1107,7 @@ class Bot:
                                          exit_cost - coin_available[q]])
                     partial_amount = round_dn(
                         round((borrow_amount + coin_available[q]) / exit['price'],
-                              self.amount_precisions[s] + 1),
+                              self.amount_precisions[s] + 2),
                         self.amount_precisions[s]
                     )
                     partial_cost = partial_amount * exit['price']
@@ -1211,12 +1230,12 @@ class Bot:
             print_([line])
         elif 'code' in cancelled:
             if cancelled['code'] == -2011:
-                print_(['trying to cancel non existent order'])
+                print_(['trying to cancel non existent order', symbol, order_id])
                 asyncio.create_task(self.update_margin_balance())
                 await asyncio.gather(self.update_margin_balance(),
                                      self.update_margin_open_orders(symbol),
                                      self.update_margin_my_trades(symbol))
-            print_(['failed to cancel order', symbol, cancelled])
+            print_(['failed to cancel order', symbol, order_id, cancelled])
         return cancelled
 
     async def borrow(self, coin: str, amount: float):
