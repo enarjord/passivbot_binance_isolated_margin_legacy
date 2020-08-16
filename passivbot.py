@@ -322,8 +322,8 @@ class Bot:
                                           self.order_book[sdash]['asks'][0]['price']) / 2
         await self.update_margin_balance()
         await self.update_borrowable(self.quot)
-        for i in range(0, len((ss := sorted(self.symbols))), (group_size := 7)):
-            sgroup = ss[i:i+group_size]
+        for i in range(0, len((ss := sorted(self.symbols))), (g_size := 14)):
+            sgroup = ss[i:i+g_size]
             if not sgroup:
                 break
             await asyncio.gather(*flatten([[self.init_ema(s),
@@ -972,6 +972,8 @@ class Bot:
             bnb_missing = self.settings['bnb_buffer'] - \
                 ((self.margin_balance['BNB']['free'] +
                   self.margin_balance['BNB']['used']) if 'BNB' in self.margin_balance else 0.0)
+            if bnb_missing > 0.0:
+                pass
 
     def allocate_credit(self) -> ([dict], [dict], [dict]):
         # allocate credit and select eligible orders
@@ -1002,52 +1004,39 @@ class Bot:
             s = entry['symbol']
             c, q = self.symbol_split[s]
             if entry['side'] == 'sell':
-                if coin_available[c] > entry['amount']:
+                borrow_amount = max(0.0, min([entry['amount'] - coin_available[c],
+                                              credit_available[c],
+                                              max_credit_avbl_quot / entry['price']]))
+                entry['amount'] = max(0.0, min(entry['amount'],
+                                               round_dn(coin_available[c] + borrow_amount,
+                                                        self.amount_precisions[s])))
+                if entry['amount'] * entry['price'] >= self.min_trade_costs[s]:
                     eligible_entries.append(entry)
-                    coin_available[c] -= entry['amount']
-                else:
-                    if credit_available[c] + coin_available[c] >= entry['amount']:
-                        eligible_entries.append(entry)
-                        borrow_amount = entry['amount'] - coin_available[c]
+                    if borrow_amount > 0.0:
                         coin_available[c] = 0.0
-                        credit_available[c] -= borrow_amount
-                        max_credit_avbl_quot -= borrow_amount * entry['price']
                         borrows[c] += borrow_amount
+                        max_credit_avbl_quot -= borrow_amount * entry['price']
+                        credit_available[c] -= borrow_amount
                     else:
-                        borrow_amount = credit_available[c]
-                        entry['amount'] = round_dn(coin_available[c] + borrow_amount,
-                                                   self.amount_precisions[s])
-                        if entry['amount'] * entry['price'] >= self.min_trade_costs[s]:
-                            eligible_entries.append(entry)
-                            coin_available[c] = 0.0
-                            max_credit_avbl_quot -= borrow_amount * entry['price']
-                            credit_available[c] = 0.0
-                            borrows[c] += borrow_amount
+                        coin_available[c] += (borrow_amount - entry['amount'])
             else:
-                entry_cost = entry['amount'] * entry['price']
-                if coin_available[q] >= entry_cost:
+                borrow_amount = max(0.0, min([entry['amount'] * entry['price'] - coin_available[q],
+                                              credit_available[q],
+                                              max_credit_avbl_quot]))
+                entry['amount'] = max(0.0, min(
+                    entry['amount'],
+                    round_dn((coin_available[q] + credit_available[q]) / entry['price']),
+                             self.amount_precisions[s]
+                ))
+                if (entry_cost := entry['amount'] * entry['price']) >= self.min_trade_costs[s]:
                     eligible_entries.append(entry)
-                    coin_available[q] -= entry_cost
-                else:
-                    if credit_available[q] + coin_available[q] >= entry_cost:
-                        eligible_entries.append(entry)
-                        borrow_amount = entry_cost - coin_available[q]
+                    if borrow_amount > 0.0:
                         coin_available[q] = 0.0
-                        credit_available[q] -= borrow_amount
-                        max_credit_avbl_quot -= borrow_amount
                         borrows[q] += borrow_amount
+                        max_credit_avbl_quot -= borrow_amount
+                        credit_available[q] -= borrow_amount
                     else:
-                        borrow_amount = credit_available[q]
-                        entry['amount'] = round_dn(
-                            (coin_available[q] + borrow_amount) / entry['price'],
-                            self.amount_precisions[s]
-                        )
-                        if entry['amount'] * entry['price'] >= self.min_trade_costs[s]:
-                            eligible_entries.append(entry)
-                            coin_available[q] = 0.0
-                            max_credit_avbl_quot -= borrow_amount
-                            credit_available[q] = 0.0
-                            borrows[q] += borrow_amount
+                        coin_available[q] += (borrow_amount - entry_cost)
         exits = []
         for s in self.longs:
             if self.settings['coins'][self.s2c[s]]['long'] and \
@@ -1081,14 +1070,13 @@ class Bot:
                     borrow_amount = min([credit_available[c],
                                          max_credit_avbl_quot / exit['price'],
                                          exit['amount'] - coin_available[c]])
-                    partial_amount = round_dn(round(borrow_amount + coin_available[c],
+                    exit['amount'] = round_dn(round(borrow_amount + coin_available[c],
                                                     self.amount_precisions[s] + 2),
                                               self.amount_precisions[s])
-                    if partial_amount * exit['price'] >= self.limits[s]['min_exit_cost']:
+                    if exit['amount'] * exit['price'] >= self.limits[s]['min_exit_cost']:
                         # partial exit
-                        exit['amount'] = partial_amount
                         eligible_exits.append(exit)
-                        coin_available[c] += borrow_amount - exit['amount']
+                        coin_available[c] = 0.0
                         credit_available[c] -= borrow_amount
                         max_credit_avbl_quot -= borrow_amount * exit['price']
                         borrows[c] += borrow_amount
@@ -1097,7 +1085,7 @@ class Bot:
                     # sell all with leftovers
                     exit['amount'] = round_dn(coin_available[c], self.amount_precisions[s])
                     eligible_exits.append(exit)
-                    coin_available[c] -= exit['amount']
+                    coin_available[c] = 0.0
             else:
                 exit_cost = exit['amount'] * exit['price']
                 if exit_cost > coin_available[q]:
@@ -1120,15 +1108,14 @@ class Bot:
                         borrows[q] += borrow_amount
                 else:
                     # full exit no borrow
-                    # adjust amount to pay off all debt
+                    # adjust amount to pay off extra debt
                     exit['amount'] = min(
                         round_up(max(self.margin_balance[c]['debt'], exit['amount']),
                                  self.amount_precisions[s]),
                         round_dn(coin_available[q] / exit['price'], self.amount_precisions[s])
                     )
-                    exit_cost = exit['amount'] * exit['price']
                     eligible_exits.append(exit)
-                    coin_available[q] -= exit_cost
+                    coin_available[q] -= exit['amount'] * exit['price']
         for s in self.liquis:
             c, q = self.symbol_split[s]
             lb = self.ideal_orders[s]['liqui_buy']
