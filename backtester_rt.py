@@ -118,9 +118,6 @@ def backtest(df: pd.DataFrame, settings: dict):
     exits_list = []
     exit_prices_list = []
 
-    long_exit_price = {s: 0.0 for s in symbols}
-    shrt_exit_price = {s: 0.0 for s in symbols}
-
     prev_long_entry_ts = {s: 0 for s in symbols}
     prev_shrt_entry_ts = {s: 0 for s in symbols}
 
@@ -143,6 +140,8 @@ def backtest(df: pd.DataFrame, settings: dict):
 
     balance_list = []
 
+    last_price = {s: 0.0 for s in s2c}
+
     start_ts, end_ts = df.index[0], df.index[-1]
     ts_range = end_ts - start_ts
     k = 0
@@ -151,6 +150,7 @@ def backtest(df: pd.DataFrame, settings: dict):
 
     for row in df.itertuples():
         s = row.symbol
+        last_price[s] = row.price
         coin = s2c[s]
         default_cost = max(
             acc_equity_quot * settings['coins'][coin]['account_equity_pct_per_trade'],
@@ -164,9 +164,11 @@ def backtest(df: pd.DataFrame, settings: dict):
                         row.Index - prev_long_entry_ts[s] >= millis_wait_until_next_long_entry[s]:
                     cost = default_cost
                     if long_cost[s] > 0.0:
+                        long_exit_price = \
+                            long_cost[s] / long_amount[s] if long_amount[s] > 0.0 else row.price
                         cost *= max(
                             1.0,
-                            min(max_multiplier, (long_exit_price[s] / row.price) ** exponent)
+                            min(max_multiplier, (long_exit_price / row.price) ** exponent)
                         )
                     quot_avbl = max(0.0, balance[quot])
                     borrow_amount = max(0.0, min(cost - quot_avbl, credit_avbl_quot))
@@ -181,11 +183,6 @@ def backtest(df: pd.DataFrame, settings: dict):
                                              'cost': cost})
                         long_cost[s] += cost
                         long_amount[s] += amount
-                        long_exit_price[s] = round_up((long_cost[s] / long_amount[s]) * ppctplus[s],
-                                                      precisions[s])
-                        exit_prices_list.append({'timestamp': row.Index, 'symbol': s,
-                                                 'side': 'sell',
-                                                 'price': max(long_exit_price[s], row.exit_price)})
                         prev_long_entry_ts[s] = row.Index
                         millis_wait_until_next_long_entry[s] = (default_cost * hour_to_millis) / \
                             (account_equity_pct_per_symbol_per_hour[coin] * acc_equity_quot)
@@ -194,9 +191,11 @@ def backtest(df: pd.DataFrame, settings: dict):
                         row.Index - prev_shrt_entry_ts[s] >= millis_wait_until_next_shrt_entry[s]:
                     cost = default_cost
                     if shrt_cost[s] > 0.0:
+                        shrt_exit_price = \
+                            shrt_cost[s] / shrt_amount[s] if shrt_amount[s] > 0.0 else row.price
                         cost *= max(
                             1.0,
-                            min(max_multiplier, (row.price / shrt_exit_price[s]) ** exponent)
+                            min(max_multiplier, (row.price / shrt_exit_price) ** exponent)
                         )
                     coin_avbl_quot = max(0.0, balance[coin]) * row.entry_price
                     borrow_amount_quot = max(0.0, min(cost - coin_avbl_quot, credit_avbl_quot))
@@ -211,61 +210,68 @@ def backtest(df: pd.DataFrame, settings: dict):
                                              'cost': cost})
                         shrt_cost[s] += cost
                         shrt_amount[s] += amount
-                        shrt_exit_price[s] = round_dn(
-                            (shrt_cost[s] / shrt_amount[s]) * ppctminus[s], precisions[s]
-                        )
-                        exit_prices_list.append({'timestamp': row.Index, 'symbol': s, 'side': 'buy',
-                                                 'price': min(shrt_exit_price[s], row.exit_price)})
                         prev_shrt_entry_ts[s] = row.Index
                         millis_wait_until_next_shrt_entry[s] = (default_cost * hour_to_millis) / \
                             (account_equity_pct_per_symbol_per_hour[coin] * acc_equity_quot)
+        bag_ratio = ((long_amount[s] - shrt_amount[s]) * row.price) / acc_equity_quot
         if row.is_buyer_maker:
-            exit_price = min(row.exit_price, shrt_exit_price[s])
+            min_exit_cost = default_cost * settings['min_exit_cost_multiplier']
+            try:
+                shrt_vwap = shrt_cost[s] / shrt_amount[s]
+            except ZeroDivisionError:
+                shrt_vwap = 10e10
+            profit_pct = 1 - min(0.1, max(settings['coins'][coin]['profit_pct'],
+                                          bag_ratio * settings['profit_pct_multiplier']))
+            exit_price = min(row.exit_price, round_dn(shrt_vwap * profit_pct, precisions[s]))
             exit_cost = shrt_amount[s] * exit_price
-            min_exit_cost = default_cost * settings['min_exit_cost_multiplier']
-            if coin in coins_shrt and row.price < exit_price and exit_cost >= min_exit_cost:
-                quot_avbl = max(0.0, balance[quot])
-                borrow_amount = max(0.0, min(exit_cost - quot_avbl, credit_avbl_quot))
-                exit_cost = min(quot_avbl + borrow_amount, exit_cost)
-                if exit_cost >= min_exit_cost:
-                    balance[quot] -= exit_cost
-                    exit_amount = exit_cost / exit_price
-                    balance[coin] += exit_amount * fee
-                    exits_list.append({'symbol': s, 'timestamp': row.Index, 'side': 'buy',
-                                       'amount': exit_amount, 'price': exit_price,
-                                       'cost': exit_cost})
-                    shrt_amount[s] -= exit_amount
-                    shrt_cost[s] -= exit_cost
-                    if shrt_amount[s] <= 0.0 or shrt_cost[s] <= 0.0:
-                        shrt_amount[s], shrt_cost[s], shrt_exit_price[s] = 0.0, 0.0, row.price
-                    else:
-                        shrt_exit_price[s] = round_dn(
-                            (shrt_cost[s] / shrt_amount[s]) * ppctminus[s],
-                            precisions[s]
-                        )
+            exit_prices_list.append({'timestamp': row.Index, 'symbol': s, 'side': 'buy',
+                                     'price': exit_price})
+            if coin in coins_shrt and shrt_amount[s] * exit_price >= min_exit_cost:
+                if row.price < exit_price and exit_cost >= min_exit_cost:
+                    quot_avbl = max(0.0, balance[quot])
+                    borrow_amount = max(0.0, min(exit_cost - quot_avbl, credit_avbl_quot))
+                    exit_cost = min(quot_avbl + borrow_amount, exit_cost)
+                    if exit_cost >= min_exit_cost:
+                        balance[quot] -= exit_cost
+                        exit_amount = exit_cost / exit_price
+                        balance[coin] += exit_amount * fee
+                        exits_list.append({'symbol': s, 'timestamp': row.Index, 'side': 'buy',
+                                           'amount': exit_amount, 'price': exit_price,
+                                           'cost': exit_cost})
+                        shrt_amount[s] -= exit_amount
+                        shrt_cost[s] -= exit_cost
+                        if shrt_amount[s] <= 0.0 or shrt_cost[s] <= 0.0:
+                            shrt_amount[s], shrt_cost[s] = 0.0, 0.0
         else:
-            exit_price = max(row.exit_price, long_exit_price[s])
-            exit_cost = long_amount[s] * exit_price
             min_exit_cost = default_cost * settings['min_exit_cost_multiplier']
-            if coin in coins_long and row.price > exit_price and exit_cost >= min_exit_cost:
-                coin_avbl_quot = max(0.0, balance[coin]) * exit_price
-                borrow_amount_quot = max(0.0, min(exit_cost - coin_avbl_quot, credit_avbl_quot))
-                exit_cost = min(coin_avbl_quot + borrow_amount_quot, exit_cost)
-                if exit_cost >= min_exit_cost:
-                    exit_amount = exit_cost / exit_price
-                    balance[coin] -= exit_amount
-                    balance[quot] += exit_cost * fee
-                    exits_list.append({'symbol': s, 'timestamp': row.Index, 'side': 'sell',
-                                       'amount': exit_amount, 'price': exit_price,
-                                       'cost': exit_cost})
-                    long_amount[s] -= exit_amount
-                    long_cost[s] -= exit_cost
-                    if long_amount[s] <= 0.0 or long_cost[s] <= 0.0:
-                        long_amount[s], long_cost[s], long_exit_price[s] = 0.0, 0.0, row.price
-                    else:
-                        long_exit_price[s] = round_up((long_cost[s] / long_amount[s]) * ppctplus[s],
-                                                      precisions[s])
-
+            try:
+                long_vwap = long_cost[s] / max(long_amount[s], 9e-9)
+            except ZeroDivisionError:
+                long_vwap = 0.0
+            profit_pct = 1 + min(0.1, max(settings['coins'][coin]['profit_pct'],
+                                          -bag_ratio * settings['profit_pct_multiplier']))
+            exit_price = max(row.exit_price, round_up(long_vwap * profit_pct, precisions[s]))
+            exit_prices_list.append({'timestamp': row.Index, 'symbol': s,
+                                     'side': 'sell',
+                                     'price': exit_price})
+            if coin in coins_long and long_amount[s] * row.exit_price >= min_exit_cost:
+                exit_cost = long_amount[s] * exit_price
+                if coin in coins_long and row.price > exit_price and exit_cost >= min_exit_cost:
+                    coin_avbl_quot = max(0.0, balance[coin]) * exit_price
+                    borrow_amount_quot = max(0.0, min(exit_cost - coin_avbl_quot, credit_avbl_quot))
+                    exit_cost = min(coin_avbl_quot + borrow_amount_quot, exit_cost)
+                    if exit_cost >= min_exit_cost:
+                        exit_amount = exit_cost / exit_price
+                        balance[coin] -= exit_amount
+                        balance[quot] += exit_cost * fee
+                        exits_list.append({'symbol': s, 'timestamp': row.Index, 'side': 'sell',
+                                           'amount': exit_amount, 'price': exit_price,
+                                           'cost': exit_cost})
+                        long_amount[s] -= exit_amount
+                        long_cost[s] -= exit_cost
+                        if long_amount[s] <= 0.0 or long_cost[s] <= 0.0:
+                            long_amount[s], long_cost[s] = 0.0, 0.0
+    
         acc_equity_quot -= (balance_ito_quot[coin] + balance_ito_quot[quot])
         acc_debt_quot -= -(min(0.0, balance_ito_quot[coin]) + min(0.0, balance_ito_quot[quot]))
 
@@ -288,12 +294,17 @@ def backtest(df: pd.DataFrame, settings: dict):
             n_millis = row.Index - start_ts
             n_days = n_millis / 1000 / 60 / 60 / 24
             avg_daily_gain = (acc_equity_quot / settings['start_quot'])**(1/n_days)
-            balance_list.append({**balance_ito_quot, **{'acc_equity_quot': acc_equity_quot,
-                                                        'acc_debt_quot': acc_debt_quot,
-                                                        'onhand_ito_quot': onhand_ito_quot,
-                                                        'credit_avbl_quot': credit_avbl_quot,
-                                                        'avg_daily_gain': avg_daily_gain,
-                                                        'timestamp': row.Index}})
+            bag_ratios = {f'bag_ratio_{s2c[s]}': ((long_amount[s] - shrt_amount[s]) *
+                                                  last_price[s]) / acc_equity_quot
+                          for s in s2c}
+            balance_list.append({**balance_ito_quot,
+                                 **{'acc_equity_quot': acc_equity_quot,
+                                    'acc_debt_quot': acc_debt_quot,
+                                    'onhand_ito_quot': onhand_ito_quot,
+                                    'credit_avbl_quot': credit_avbl_quot,
+                                    'avg_daily_gain': avg_daily_gain,
+                                    'timestamp': row.Index},
+                                 **bag_ratios})
             line = f'\r{(n_millis / ts_range) * 100:.2f}% '
             line += f'n_days {n_days:.2f} '
             line += f'acc equity quot: {acc_equity_quot:.6f}  '
