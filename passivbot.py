@@ -623,12 +623,18 @@ class Bot:
              (self.settings['min_exit_cost_multiplier'] * 0.75) /
              self.last_price[symbol])
         )
+        c, q = self.symbol_split[symbol]
+        bag_ratio = ((analysis['long_amount'] - analysis['shrt_amount']) /
+                     self.margin_balance[c]['account_equity'])
+        bag_ratio_m = bag_ratio * self.settings['profit_pct_multiplier']
         analysis['long_sel_price'] = round_up(
-            analysis['long_vwap'] * self.profit_pct_plus[symbol],
+            (1 + min(0.1, max(self.settings['coins'][c]['profit_pct'],
+                              -bag_ratio_m))) * analysis['long_vwap'],
             self.price_precisions[symbol]
         )
         analysis['shrt_buy_price'] = round_dn(
-            analysis['shrt_vwap'] * self.profit_pct_minus[symbol],
+            (1 - min(0.1, max(self.settings['coins'][c]['profit_pct'],
+                              bag_ratio_m))) * analysis['shrt_vwap'],
             self.price_precisions[symbol]
         )
         self.margin_my_trades_analyses[symbol] = analysis
@@ -1025,8 +1031,8 @@ class Bot:
                                               max_credit_avbl_quot]))
                 entry['amount'] = max(0.0, min(
                     entry['amount'],
-                    round_dn((coin_available[q] + credit_available[q]) / entry['price']),
-                             self.amount_precisions[s]
+                    round_dn((coin_available[q] + credit_available[q]) / entry['price'],
+                             self.amount_precisions[s])
                 ))
                 if (entry_cost := entry['amount'] * entry['price']) >= self.min_trade_costs[s]:
                     eligible_entries.append(entry)
