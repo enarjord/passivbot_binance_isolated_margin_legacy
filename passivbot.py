@@ -105,10 +105,11 @@ class ABinance:
                                      start_time: int = None,
                                      end_time: int = None,
                                      from_id: int = None,
-                                     limit: int = None):
+                                     limit: int = None,
+                                     recv_window: int = 5000):
         kwargs = {'symbol': symbol.replace('/', '')}
-        for key, kwarg in zip(['startTime', 'endTime', 'fromId', 'limit'],
-                              [start_time, end_time, from_id, limit]):
+        for key, kwarg in zip(['startTime', 'endTime', 'fromId', 'limit', 'recvWindow'],
+                              [start_time, end_time, from_id, limit, recv_window]):
             if kwarg is not None:
                 kwargs[key] = kwarg
         return await self.base_get('myTrades', kwargs)
@@ -575,20 +576,32 @@ class Bot:
         fetched_history = []
         prev_my_trades = []
         while True:
-            my_trades = [{
-                'symbol': symbol,
-                'id': t['id'],
-                'order_id': t['orderId'],
-                'side': 'buy' if t['isBuyer'] else 'sell',
-                'amount': (amount := float(t['qty'])),
-                'price': (price := float(t['price'])),
-                'cost': amount * price,
-                'timestamp': t['time'],
-                'datetime': ts_to_date(t['time'] / 1000),
-                'is_maker': t['isMaker'],
-            } for t in await self.abinance.fetch_margin_my_trades(symbol,
-                                                                  limit=limit,
-                                                                  from_id=from_id)]
+            my_trades = []
+            print(f'fetching mt {symbol} {ts_to_date(time())}')
+            mtf = await self.abinance.fetch_margin_my_trades(symbol,
+                                                             limit=limit,
+                                                             from_id=from_id,
+                                                             recv_window=10000)
+            print(f'fetched mt {symbol} {ts_to_date(time())}')
+
+            for t in mtf:
+                try:
+                    my_trades.append({
+                        'symbol': symbol,
+                        'id': t['id'],
+                        'order_id': t['orderId'],
+                        'side': 'buy' if t['isBuyer'] else 'sell',
+                        'amount': (amount := float(t['qty'])),
+                        'price': (price := float(t['price'])),
+                        'cost': amount * price,
+                        'timestamp': t['time'],
+                        'datetime': ts_to_date(t['time'] / 1000),
+                        'is_maker': t['isMaker'],
+                    })
+                except Exception as e:
+                    # debug
+                    print(symbol, e, t, mtf)
+                    raise Exception
             fetched_history += my_trades
             if len(my_trades) < limit or my_trades == prev_my_trades:
                 break
