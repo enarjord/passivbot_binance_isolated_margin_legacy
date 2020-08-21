@@ -1,8 +1,10 @@
 {
     "quot": "BTC",
+    "borrow_quot": true,
     "bnb_buffer": 50.3,
     "max_memory_span_days": 120,
     "snapshot_timestamp_millis": 0,
+    "profit_pct_multiplier": 2.0,
     "ema_spans_minutes": [
         15,
         25,
@@ -24,7 +26,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -33,7 +35,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -42,7 +44,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -51,7 +53,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -60,7 +62,7 @@
             "shrt": false,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": false
         },
@@ -69,7 +71,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -78,7 +80,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -87,7 +89,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -96,7 +98,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -105,7 +107,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -114,7 +116,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -123,7 +125,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -132,7 +134,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -141,7 +143,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -150,7 +152,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -159,7 +161,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -168,7 +170,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -177,7 +179,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -186,7 +188,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -195,7 +197,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -204,7 +206,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -213,7 +215,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -222,7 +224,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -231,7 +233,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         },
@@ -240,7 +242,7 @@
             "shrt": true,
             "account_equity_pct_per_hour": 0.0005,
             "account_equity_pct_per_trade": 0.0001,
-            "entry_spread": 0.002,
+            "entry_spread": 0.001,
             "profit_pct": 0.0025,
             "borrow": true
         }
