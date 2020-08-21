@@ -130,7 +130,7 @@ about the settings:
                                                     # if both "long" and "shrt" are false, the bot will gradually liquidate coin
             "account_equity_pct_per_hour": 0.0005,  # max percentage of total account equity per hour to trade with this coin
             "account_equity_pct_per_trade": 0.0001, # percentage of total account equity size of entries
-            "entry_spread": 0.002,                  # spread to be added to min and max emas, see below
+            "entry_spread": 0.001,                  # spread to be added to min and max emas, see below
             "profit_pct": 0.0025,                   # minimum exit markup
             "borrow": true                          # whether to borrow coin or not. BNB is set to false by default because of high interest rate
         },
