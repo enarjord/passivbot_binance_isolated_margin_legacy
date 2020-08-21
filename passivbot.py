@@ -577,12 +577,14 @@ class Bot:
         prev_my_trades = []
         while True:
             my_trades = []
-            print(f'fetching mt {symbol} {ts_to_date(time())}')
             mtf = await self.abinance.fetch_margin_my_trades(symbol,
                                                              limit=limit,
                                                              from_id=from_id,
                                                              recv_window=10000)
-            print(f'fetched mt {symbol} {ts_to_date(time())}')
+            if 'code' in mtf and mtf['code'] == -1021:
+                print(f'fetch my trades {symbol} outside recvWindow, trying again')
+                await asyncio.sleep(2)
+                continue
 
             for t in mtf:
                 try:
