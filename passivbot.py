@@ -964,9 +964,13 @@ class Bot:
             bid_amount = max(
                 0.0,
                 round_up(min(liqui_cost / bid_price,
-                             self.margin_balance[coin]['debt'] - self.margin_balance[coin]['onhand']),
+                             (self.margin_balance[coin]['debt'] -
+                              self.margin_balance[coin]['onhand'])),
                          self.amount_precisions[s])
             )
+            if bid_amount > 0.0 and bid_amount * bid_price < self.min_trade_costs[s]:
+                bid_amount = round_up(self.min_trade_costs[s] / bid_price,
+                                      self.amount_precisions[s])
             ask_amount = max(
                 0.0,
                 min(round_up(liqui_cost / ask_price, self.amount_precisions[s]),
@@ -980,7 +984,7 @@ class Bot:
             else:
                 self.ideal_orders[s]['liqui_sel'] = {'symbol': s, 'side': 'sell', 'amount': 0.0,
                                                      'price': 0.0}
-            if bid_amount * bid_price > self.min_trade_costs[s] and ask_price > 0.0:
+            if bid_amount * bid_price > self.min_trade_costs[s] and bid_price > 0.0:
                 self.ideal_orders[s]['liqui_buy'] = {'symbol': s, 'side': 'buy',
                                                      'amount': bid_amount,
                                                      'price': bid_price}
