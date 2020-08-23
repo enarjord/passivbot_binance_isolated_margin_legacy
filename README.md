@@ -8,7 +8,7 @@ requires python >= 3.8
 dependencies, install with pip:
 
 
-`python3.8 -m pip install matplotlib pandas`
+`python3.8 -m pip install matplotlib pandas websockets`
 
 
 binance account needs margin enabled,
