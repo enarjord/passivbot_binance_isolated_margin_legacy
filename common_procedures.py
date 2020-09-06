@@ -34,3 +34,17 @@ def print_(args, r=False):
         print(line)
     sys.stdout.flush()
     return line
+
+
+def load_settings(exchange: str, user: str):
+    default_settings = json.load(open(f'settings/{exchange}/default.json'))
+    try:
+        settings = json.load(open(f'settings/{exchange}/{user}.json'))
+        for k0 in default_settings:
+            if k0 not in settings:
+                settings[k0] = default_settings[k0]
+    except FileNotFoundError:
+        print(f'{user} not found, using default settings')
+        settings = default_settings
+    settings['user'] = user
+    return settings
