@@ -48,7 +48,7 @@ consider changing "snapshot_timestamp_millis" from 0 to current unix time in mil
 
 run in terminal:
 
-`python3.8 passivbot.py your_user_name`
+`python3.8 passivbot_isolated_margin.py your_user_name`
 
 
 
