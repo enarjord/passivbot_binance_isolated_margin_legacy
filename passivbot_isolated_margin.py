@@ -615,7 +615,7 @@ class Bot:
 
     async def execute_to_exchange(self, s: str) -> None:
         now = time()
-        if now - self.timestamps['released']['execute_to_exchange'][s] < 0.5:
+        if now - self.timestamps['released']['execute_to_exchange'][s] < 1.0:
             return
         if self.is_executing('execute_to_exchange', s):
             return
@@ -628,16 +628,30 @@ class Bot:
                 return
         eligible_orders = self.get_ideal_orders(s)
         orders_to_delete, orders_to_create = filter_orders(self.open_orders[s], eligible_orders)
-        for o in orders_to_delete[:8]:
-            asyncio.create_task(tw(self.cancel_order, args=(s, o['order_id'])))
+        if orders_to_delete:
+            asyncio.create_task(tw(self.cancel_order, args=(s, orders_to_delete[0]['order_id'])))
+        elif orders_to_create:
+            o = orders_to_create[0]
+            if o['side'] == 'buy':
+                if len(self.my_bids[s]) < 2:
+                    asyncio.create_task(tw(self.create_bid, args=(s, o['amount'], o['price'])))
+            elif o['side'] == 'sell':
+                if len(self.my_asks[s]) < 3:
+                    asyncio.create_task(tw(self.create_ask, args=(s, o['amount'], o['price'])))
+        '''
+        for o in orders_to_delete[:2]:
+            asyncio.create_task(tw(self.cancel_order,
+                                   args=(s, o['order_id']),
+                                   kwargs={'wait': False}))
             await asyncio.sleep(0.1)
-        for o in orders_to_create[:4]:
-            if o['side'] == 'buy' and len(self.my_bids[s]) < 2:
+        for o in orders_to_create[:1]:
+            if o['side'] == 'buy':
                 asyncio.create_task(tw(self.create_bid, args=(s, o['amount'], o['price'])))
                 await asyncio.sleep(0.1)
-            elif o['side'] == 'sell' and len(self.my_asks[s]) < 2:
+            elif o['side'] == 'sell':
                 asyncio.create_task(tw(self.create_ask, args=(s, o['amount'], o['price'])))
                 await asyncio.sleep(0.1)
+        '''
         self.timestamps['released']['execute_to_exchange'][s] = time()
 
 
@@ -1059,29 +1073,27 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
     return cropped_my_trades, analysis
 
 
-def filter_orders(actual_orders: [dict], ideal_orders: [dict]) -> ([dict], [dict]):
+def filter_orders(actual_orders: [dict],
+                  ideal_orders: [dict],
+                  keys: [str] = ['symbol', 'side', 'amount', 'price']) -> ([dict], [dict]):
+    # returns (orders_to_delete, orders_to_create)
 
-    keys = ['symbol', 'side', 'amount', 'price']
-    # actual_orders = [{'price': float, 'amount': float', 'side': str, 'id': int, ...}]
-    # ideal_orders = [{'price': float, 'amount': float', 'side': str}]
     if not actual_orders:
         return [], ideal_orders
     if not ideal_orders:
         return actual_orders, []
-    orders_to_delete = []
+    actual_orders = actual_orders.copy()
     orders_to_create = []
     ideal_orders_cropped = [{k: o[k] for k in keys} for o in ideal_orders]
     actual_orders_cropped = [{k: o[k] for k in keys} for o in actual_orders]
-
-    for oc, o in zip(actual_orders_cropped, actual_orders):
-        if oc not in ideal_orders_cropped:
-            orders_to_delete.append(o)
-            # ideal_orders_cropped = [io for io in ideal_orders_cropped if io != oc]
-    for oc, o in zip(ideal_orders_cropped, ideal_orders):
-        if oc not in actual_orders_cropped:
-            orders_to_create.append(o)
-            actual_orders_cropped.append(oc)
-    return orders_to_delete, orders_to_create
+    for ioc, io in zip(ideal_orders_cropped, ideal_orders):
+        matches = [(aoc, ao) for aoc, ao in zip(actual_orders_cropped, actual_orders) if aoc == ioc]
+        if matches:
+            actual_orders.remove(matches[0][1])
+            actual_orders_cropped.remove(matches[0][0])
+        else:
+            orders_to_create.append(io)
+    return actual_orders, orders_to_create
 
 
 async def main():
