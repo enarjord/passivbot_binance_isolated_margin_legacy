@@ -303,6 +303,8 @@ class Bot:
     async def cancel_order(self, symbol: str, id_: int):
         if self.is_executing('cancel_order', symbol):
             return
+        if int(id_) not in {int(o['order_id']) for o in self.open_orders[symbol]}:
+            return
         cancelled = await tw(self.cc.sapi_delete_margin_order, kwargs={'params': {
             'symbol': symbol.replace('/', ''),
             'isIsolated': 'TRUE',
@@ -603,12 +605,10 @@ class Bot:
         for key0 in ['update_balance', 'update_open_orders', 'update_my_trades']:
             if now - self.timestamps['released'][key0][s] > \
                     FORCE_UPDATE_INTERVAL_SECONDS + np.random.choice(np.arange(-60, 60, 1)):
-                print_(['force', key0, s])
                 asyncio.create_task(tw(getattr(self, key0), args=(s,)))
         for k in self.symbol_split[s]:
             if now - self.timestamps['released']['update_borrowable'][s + k] > \
                     FORCE_UPDATE_INTERVAL_SECONDS + np.random.choice(np.arange(-60, 60, 1)):
-                print_(['force update borrowable', s, k])
                 asyncio.create_task(tw(self.update_borrowable, args=(s, k)))
 
         asyncio.create_task(tw(self.execute_to_exchange, args=(s,)))
@@ -626,13 +626,12 @@ class Bot:
         for k in [c, q]:
             if self.is_executing('update_borrowable', s + k, do_lock=False):
                 return
-        self.set_ideal_orders(s)
-        eligible_orders = self.allocate_credit(s)
+        eligible_orders = self.get_ideal_orders(s)
         orders_to_delete, orders_to_create = filter_orders(self.open_orders[s], eligible_orders)
-        for o in orders_to_delete[:4]:
+        for o in orders_to_delete[:8]:
             asyncio.create_task(tw(self.cancel_order, args=(s, o['order_id'])))
             await asyncio.sleep(0.1)
-        for o in orders_to_create[:2]:
+        for o in orders_to_create[:4]:
             if o['side'] == 'buy' and len(self.my_bids[s]) < 2:
                 asyncio.create_task(tw(self.create_bid, args=(s, o['amount'], o['price'])))
                 await asyncio.sleep(0.1)
@@ -734,7 +733,7 @@ class Bot:
         self.rolling_10s_orders.append(now)
         self.rolling_10m_orders.append(now)
 
-    def set_ideal_orders(self, s: str):
+    def get_ideal_orders(self, s: str):
 
         coin, quot = self.symbol_split[s]
 
@@ -760,14 +759,21 @@ class Bot:
         # set ideal orders
         exponent = self.settings[s]['entry_vol_modifier_exponent']
         now_millis = self.cc.milliseconds()
+        shrt_sel_price = max([
+            round_up(self.max_ema[s] * (1 + self.settings[s]['entry_spread']),
+                     self.price_precisions[s]),
+            other_bid_incr,
+            (other_ask_decr if entry_cost / other_ask_decr < lowest_other_ask['amount']
+             else lowest_other_ask['price'])
+        ])
+        long_buy_price = min([
+            round_dn(self.min_ema[s] * (1 - self.settings[s]['entry_spread']),
+                     self.price_precisions[s]),
+            other_ask_decr,
+            (other_bid_incr if entry_cost / other_bid_incr < highest_other_bid['amount']
+             else highest_other_bid['price'])
+        ])
         if self.settings[s]['shrt']:
-            shrt_sel_price = max([
-                round_up(self.max_ema[s] * (1 + self.settings[s]['entry_spread']),
-                         self.price_precisions[s]),
-                other_bid_incr,
-                (other_ask_decr if entry_cost / other_ask_decr < lowest_other_ask['amount']
-                 else lowest_other_ask['price'])
-            ])
             shrt_amount_modifier = max(
                 1.0,
                 min(
@@ -827,13 +833,6 @@ class Bot:
                 'price': 0.0
             }
         if self.settings[s]['long']:
-            long_buy_price = min([
-                round_dn(self.min_ema[s] * (1 - self.settings[s]['entry_spread']),
-                         self.price_precisions[s]),
-                other_ask_decr,
-                (other_bid_incr if entry_cost / other_bid_incr < highest_other_bid['amount']
-                 else highest_other_bid['price'])
-            ])
             long_amount_modifier = max(
                 1.0,
                 min(
@@ -892,12 +891,12 @@ class Bot:
                 'amount': 0.0,
                 'price': 0.0
             }
-        return
 
-    def allocate_credit(self, s: str):
         c, q = self.symbol_split[s]
         coin_available = self.balance[s][c]['onhand'] + self.balance[s][c]['borrowable']
         quot_available = self.balance[s][q]['onhand'] + self.balance[s][q]['borrowable']
+        coin_leftover = self.balance[s][c]['equity']
+        quot_leftover = self.balance[s][q]['equity']
         min_exit_cost = self.balance[s]['entry_cost'] * self.settings[s]['min_exit_cost_multiplier']
         eligible_orders = []
         o = self.ideal_orders[s]['long_buy']
@@ -905,45 +904,63 @@ class Bot:
             if quot_available >= cost:
                 eligible_orders.append(o)
                 quot_available -= cost
+                quot_leftover -= cost
             else:
                 new_amount = round_dn(quot_available / o['price'], self.price_precisions[s])
                 if (new_cost := new_amount * o['price']) > self.min_trade_costs[s]:
                     o['amount'] = new_amount
                     eligible_orders.append(o)
                     quot_available -= new_cost
+                    quot_leftover -= new_cost
         o = self.ideal_orders[s]['shrt_sel']
         if (cost := o['price'] * o['amount']) > self.min_trade_costs[s]:
             if coin_available >= o['amount']:
                 eligible_orders.append(o)
                 coin_available -= o['amount']
+                coin_leftover -= o['amount']
             else:
                 new_amount = round_dn(coin_available, self.price_precisions[s])
                 if new_amount * o['price'] > self.min_trade_costs[s]:
                     o['amount'] = new_amount
                     eligible_orders.append(o)
                     coin_available -= new_amount
+                    coin_leftover -= new_amount
         o = self.ideal_orders[s]['long_sel']
         if (cost := o['price'] * o['amount']) > self.min_trade_costs[s]:
             if coin_available >= o['amount']:
                 eligible_orders.append(o)
                 coin_available -= o['amount']
+                coin_leftover -= o['amount']
             else:
                 new_amount = round_dn(coin_available, self.price_precisions[s])
                 if new_amount * o['price'] > min_exit_cost:
                     o['amount'] = new_amount
                     eligible_orders.append(o)
                     coin_available -= new_amount
+                    coin_leftover -= new_amount
         o = self.ideal_orders[s]['shrt_buy']
         if (cost := o['price'] * o['amount']) > min_exit_cost:
             if quot_available >= cost:
                 eligible_orders.append(o)
                 quot_available -= cost
+                quot_leftover -= cost
+
             else:
                 new_amount = round_dn(quot_available / o['price'], self.price_precisions[s])
                 if (new_cost := new_amount * o['price']) > min_exit_cost:
                     o['amount'] = new_amount
                     eligible_orders.append(o)
                     quot_available -= new_cost
+                    quot_leftover -= new_cost
+        if coin_leftover * \
+                (liqui_price := max(self.ideal_orders[s]['long_sel']['price'], shrt_sel_price)) > \
+                min_exit_cost:
+            eligible_orders.append({
+                'symbol': s,
+                'side': 'sell',
+                'amount': round_up(min_exit_cost / shrt_sel_price, self.amount_precisions[s]),
+                'price': liqui_price,
+            })
         return eligible_orders
 
 
@@ -1074,6 +1091,7 @@ async def main():
         await bot.start()
     except KeyboardInterrupt:
         await bot.cc.close()
+        print('closed ccxt session')
 
 
 if __name__ == '__main__':
