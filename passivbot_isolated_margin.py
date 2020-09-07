@@ -5,6 +5,7 @@ import websockets
 import os
 import sys
 import random
+import numpy as np
 import traceback
 from common_procedures import print_, load_key_secret, make_get_filepath
 from common_functions import ts_to_date, calc_new_ema, remove_duplicates, partition_sorted, \
@@ -18,7 +19,7 @@ import ccxt.async_support as ccxt_async
 
 
 HOUR_TO_MILLIS = 60 * 60 * 1000
-FORCE_UPDATE_INTERVAL_SECONDS = 60 * 3
+FORCE_UPDATE_INTERVAL_SECONDS = 60 * 4
 MAX_ORDERS_PER_24H = 200000
 MAX_ORDERS_PER_10M = MAX_ORDERS_PER_24H / 24 / 6
 MAX_ORDERS_PER_10S = 100
@@ -223,6 +224,7 @@ class Bot:
         }})
         if type(bid) != dict:
             bidf = None
+            asyncio.create_task(tw(self.update_balance, args=(symbol,)))
             print_(['error creating bid', symbol, amount, price])
 
         else:
@@ -245,6 +247,8 @@ class Bot:
             self.open_orders[symbol] = \
                 sorted(self.open_orders[symbol] + [bidf], key=lambda x: x['price'])
             self.my_bids[symbol] = sorted(self.my_bids[symbol] + [bidf], key=lambda x: x['price'])
+            self.balance[symbol][quot]['free'] -= bidf['amount'] * bidf['price']
+            self.balance[symbol][quot]['used'] += bidf['amount'] * bidf['price']
             print_(['  created',
                     [bidf[k] for k in ['symbol', 'side', 'amount', 'price', 'order_id']]])
         self.timestamps['released']['create_bid'][symbol] = time()
@@ -266,6 +270,7 @@ class Bot:
         }})
         if type(ask) != dict:
             askf = None
+            asyncio.create_task(tw(self.update_balance, args=(symbol,)))
             print_(['error creating ask', symbol, amount, price])
         else:
             askf = {
@@ -287,6 +292,8 @@ class Bot:
             self.open_orders[symbol] = \
                 sorted(self.open_orders[symbol] + [askf], key=lambda x: x['price'])
             self.my_asks[symbol] = sorted(self.my_asks[symbol] + [askf], key=lambda x: x['price'])
+            self.balance[symbol][coin]['free'] -= askf['amount']
+            self.balance[symbol][coin]['used'] += askf['amount']
             print_(['  created',
                     [askf[k] for k in ['symbol', 'side', 'amount', 'price', 'order_id']]])
     
@@ -594,12 +601,13 @@ class Bot:
 
         now = time()
         for key0 in ['update_balance', 'update_open_orders', 'update_my_trades']:
-            if now - self.timestamps['released'][key0][s] > FORCE_UPDATE_INTERVAL_SECONDS:
+            if now - self.timestamps['released'][key0][s] > \
+                    FORCE_UPDATE_INTERVAL_SECONDS + np.random.choice(np.arange(-60, 60, 1)):
                 print_(['force', key0, s])
                 asyncio.create_task(tw(getattr(self, key0), args=(s,)))
         for k in self.symbol_split[s]:
             if now - self.timestamps['released']['update_borrowable'][s + k] > \
-                    FORCE_UPDATE_INTERVAL_SECONDS:
+                    FORCE_UPDATE_INTERVAL_SECONDS + np.random.choice(np.arange(-60, 60, 1)):
                 print_(['force update borrowable', s, k])
                 asyncio.create_task(tw(self.update_borrowable, args=(s, k)))
 
@@ -623,14 +631,14 @@ class Bot:
         orders_to_delete, orders_to_create = filter_orders(self.open_orders[s], eligible_orders)
         for o in orders_to_delete[:4]:
             asyncio.create_task(tw(self.cancel_order, args=(s, o['order_id'])))
-            await asyncio.sleep(0.05)
-        for o in orders_to_create[:3]:
-            if o['side'] == 'buy':
+            await asyncio.sleep(0.1)
+        for o in orders_to_create[:2]:
+            if o['side'] == 'buy' and len(self.my_bids[s]) < 2:
                 asyncio.create_task(tw(self.create_bid, args=(s, o['amount'], o['price'])))
-                await asyncio.sleep(0.05)
-            elif o['side'] == 'sell':
+                await asyncio.sleep(0.1)
+            elif o['side'] == 'sell' and len(self.my_asks[s]) < 2:
                 asyncio.create_task(tw(self.create_ask, args=(s, o['amount'], o['price'])))
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.1)
         self.timestamps['released']['execute_to_exchange'][s] = time()
 
 
@@ -943,7 +951,7 @@ class Bot:
         now = time()
         if now - self.timestamps['locked']['dump_balance_log'][s] < 60 * 60:
             return
-        print_(['dumping balance'])
+        print_(['dumping balance', s])
         filepath = make_get_filepath(
             f'logs/binance/{self.user}/isolated_margin_balances/{self.dash_to_nodash[s]}.txt'
         )
@@ -1035,6 +1043,8 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
 
 
 def filter_orders(actual_orders: [dict], ideal_orders: [dict]) -> ([dict], [dict]):
+
+    keys = ['symbol', 'side', 'amount', 'price']
     # actual_orders = [{'price': float, 'amount': float', 'side': str, 'id': int, ...}]
     # ideal_orders = [{'price': float, 'amount': float', 'side': str}]
     if not actual_orders:
@@ -1042,21 +1052,28 @@ def filter_orders(actual_orders: [dict], ideal_orders: [dict]) -> ([dict], [dict
     if not ideal_orders:
         return actual_orders, []
     orders_to_delete = []
-    ideal_orders_copy = [{k: o[k] for k in ['symbol', 'side', 'amount', 'price']}
-                         for o in ideal_orders]
-    for o in actual_orders:
-        o_cropped = {k: o[k] for k in ['symbol', 'side', 'amount', 'price']}
-        if o_cropped in ideal_orders_copy:
-            ideal_orders_copy.remove(o_cropped)
-        else:
+    orders_to_create = []
+    ideal_orders_cropped = [{k: o[k] for k in keys} for o in ideal_orders]
+    actual_orders_cropped = [{k: o[k] for k in keys} for o in actual_orders]
+
+    for oc, o in zip(actual_orders_cropped, actual_orders):
+        if oc not in ideal_orders_cropped:
             orders_to_delete.append(o)
-    return orders_to_delete, ideal_orders_copy
+            # ideal_orders_cropped = [io for io in ideal_orders_cropped if io != oc]
+    for oc, o in zip(ideal_orders_cropped, ideal_orders):
+        if oc not in actual_orders_cropped:
+            orders_to_create.append(o)
+            actual_orders_cropped.append(oc)
+    return orders_to_delete, orders_to_create
 
 
 async def main():
     settings = load_settings(sys.argv[1])
     bot = await create_bot(settings)
-    await bot.start()
+    try:
+        await bot.start()
+    except KeyboardInterrupt:
+        await bot.cc.close()
 
 
 if __name__ == '__main__':
