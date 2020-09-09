@@ -116,15 +116,9 @@ class Bot:
         self.timestamps['released'] = {k0: {k1: self.timestamps['locked'][k0][k1] + 1
                                             for k1 in self.timestamps['locked'][k0]}
                                        for k0 in self.timestamps['locked']}
+        tickers = await self.cc.fetch_tickers()
+        self.last_price = {s_: tickers[s_]['last'] for s_ in tickers if tickers[s_]['last'] > 0.0}
 
-        await self.update_balance()
-        for s in list(self.symbols):
-            '''
-            if s not in self.balance:
-                result = await tw(self.enable_isolated, args=(s,))
-                print_([result])
-                sleep(2.0)
-            '''
         await self.update_balance()
         for s in list(self.symbols):
             if s not in self.balance or not self.balance[s]['equity']:
@@ -383,11 +377,35 @@ class Bot:
         if symbol is not None and self.is_executing('update_balance', symbol):
             return
         print_(['updating balance', symbol])
-        fetched = await tw(self.get_balance, args=(symbol,))
-        for e in fetched['assets']:
-            s = self.nodash_to_dash[e['symbol']]
+        balances = await tw(self.get_balance, args=(symbol,))
+        for s in balances:
             if s not in self.symbols:
                 continue
+            try:
+                if self.balance[s][coin]['equity'] != balance[s][coin]['equity'] or \
+                        self.balance[s][quot]['equity'] != balance[s][quot]['equity']:
+                    await asyncio.gather(*[tw(self.update_open_orders, args=(s,)),
+                                           tw(self.update_my_trades, args=(s,)),
+                                           tw(self.update_borrowable, args=(s, coin)),
+                                           tw(self.update_borrowable, args=(s, quot))])
+            except Exception as e:
+                pass
+
+            self.balance[s] = balances[s]
+            self.dump_balance_log(s)
+            self.timestamps['released']['update_balance'][s] = time()
+
+    async def get_balance(self, symbol: str = None):
+        if symbol is None:
+            fetched = await tw(self.cc.sapi_get_margin_isolated_account)
+        else:
+            fetched = await tw(self.cc.sapi_get_margin_isolated_account,
+                            kwargs={'params': {'symbols': self.dash_to_nodash[symbol]}})
+        balances = {}
+        total_eq_btc = float(fetched['totalNetAssetOfBtc'])
+        for e in fetched['assets']:
+            balance = {}
+            s = self.nodash_to_dash[e['symbol']]
             coin, quot = self.symbol_split[s]
             balance = {
                 k0: {
@@ -403,29 +421,17 @@ class Bot:
                 } for k0, k1 in zip([quot, coin], ['quoteAsset', 'baseAsset'])
             }
             balance['equity'] = sum([balance[k]['equity_ito_btc'] for k in [coin, quot]])
-            balance['entry_cost'] = max(
-                self.settings[s]['account_equity_pct_per_entry'] * balance['equity'],
-                self.min_trade_costs[s]
-            )
+            balance['total_equity'] = total_eq_btc
             try:
-                if self.balance[s][coin]['equity'] != balance[coin]['equity'] or \
-                        self.balance[s][quot]['equity'] != balance[quot]['equity']:
-                    await asyncio.gather(*[tw(self.update_open_orders, args=(s,)),
-                                           tw(self.update_my_trades, args=(s,)),
-                                           tw(self.update_borrowable, args=(s, coin)),
-                                           tw(self.update_borrowable, args=(s, quot))])
-            except Exception as e:
+                balance['entry_cost'] = max([
+                    self.settings[s]['account_equity_pct_per_entry'] * balance['equity'],
+                    self.min_trade_costs[s],
+                    10**-self.amount_precisions[s] * self.last_price[s]
+                ])
+            except:
                 pass
-
-            self.balance[s] = balance
-            self.dump_balance_log(s)
-            self.timestamps['released']['update_balance'][s] = time()
-
-    async def get_balance(self, symbol: str = None):
-        if symbol is None:
-            return await tw(self.cc.sapi_get_margin_isolated_account)
-        return await tw(self.cc.sapi_get_margin_isolated_account,
-                        kwargs={'params': {'symbols': self.dash_to_nodash[symbol]}})
+            balances[s] = balance
+        return balances
 
     async def get_open_orders(self, symbol: str):
         oos = await tw(self.cc.sapi_get_margin_openorders, kwargs={'params': {
@@ -966,6 +972,7 @@ class Bot:
                     eligible_orders.append(o)
                     quot_available -= new_cost
                     quot_leftover -= new_cost
+        '''
         if coin_leftover * \
                 (liqui_price := max(self.ideal_orders[s]['long_sel']['price'], shrt_sel_price)) > \
                 min_exit_cost:
@@ -975,6 +982,7 @@ class Bot:
                 'amount': round_up(min_exit_cost / shrt_sel_price, self.amount_precisions[s]),
                 'price': liqui_price,
             })
+        '''
         return eligible_orders
 
 
