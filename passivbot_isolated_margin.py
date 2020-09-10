@@ -307,7 +307,9 @@ class Bot:
             try:
                 if '-2011' in cancelled.args[0]:
                     print_(['error cancelling order, code -2011, unknown order', symbol, id_])
-                    asyncio.create_task(self.update_open_orders(symbol))
+                    asyncio.create_task(tw(self.update_balance, args=(symbol,)))
+                    asyncio.create_task(tw(self.update_open_orders, args=(symbol,)))
+                    asyncio.create_task(tw(self.update_my_trades, args=(symbol,)))
             except:
                 pass
         else:
@@ -656,11 +658,11 @@ class Bot:
         eligible_orders = self.get_ideal_orders(s)
         orders_to_delete, orders_to_create = filter_orders(self.open_orders[s], eligible_orders)
         if orders_to_delete:
-            print('debug', s, 'to delete', [[e[k] for k in ['side', 'amount', 'price']]
-                                            for e in orders_to_delete])
+            print_(['debug', s, 'to delete', [[e[k] for k in ['side', 'amount', 'price']]
+                                              for e in orders_to_delete]])
         if orders_to_create:
-            print('debug', s, 'to create', [[e[k] for k in ['side', 'amount', 'price']]
-                                            for e in orders_to_create])
+            print_(['debug', s, 'to create', [[e[k] for k in ['side', 'amount', 'price']]
+                                              for e in orders_to_create]])
         if orders_to_delete:
             asyncio.create_task(tw(self.cancel_order, args=(s, orders_to_delete[0]['order_id'])))
         elif orders_to_create:
