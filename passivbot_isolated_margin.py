@@ -111,7 +111,7 @@ class Bot:
                                       'cancel_order': {s: now_m2 for s in self.symbols},
                                       'borrow': {sc: now_m2 for sc in scs},
                                       'repay': {sc: now_m2 for sc in scs},
-                                      'dump_balance_log': {s: 0 for s in self.symbols},
+                                      'dump_balance_log': {'dump_balance_log': 0},
                                       'execute_to_exchange': {s: now_m2 for s in self.symbols}}}
         self.timestamps['released'] = {k0: {k1: self.timestamps['locked'][k0][k1] + 1
                                             for k1 in self.timestamps['locked'][k0]}
@@ -201,7 +201,7 @@ class Bot:
         }})
         return t
 
-    async def create_bid(self, symbol: str, amount: float, price: float):
+    async def create_bid(self, symbol: str, amount: float, price: float) -> None:
         if self.is_executing('create_bid', symbol):
             return
         coin, quot = self.symbol_split[symbol]
@@ -246,9 +246,8 @@ class Bot:
             print_(['  created',
                     [bidf[k] for k in ['symbol', 'side', 'amount', 'price', 'order_id']]])
         self.timestamps['released']['create_bid'][symbol] = time()
-        return bidf
 
-    async def create_ask(self, symbol: str, amount: float, price: float):
+    async def create_ask(self, symbol: str, amount: float, price: float) -> None:
         if self.is_executing('create_ask', symbol):
             return
         coin, quot = self.symbol_split[symbol]
@@ -292,7 +291,6 @@ class Bot:
                     [askf[k] for k in ['symbol', 'side', 'amount', 'price', 'order_id']]])
     
         self.timestamps['released']['create_ask'][symbol] = time()
-        return askf
 
     async def cancel_order(self, symbol: str, id_: int):
         if self.is_executing('cancel_order', symbol):
@@ -369,8 +367,14 @@ class Bot:
         if self.is_executing('update_borrowable', sc):
             return
         print_(['updating borrowable', symbol, coin])
-        borrowable = await tw(self.get_borrowable, args=(symbol, coin))
-        self.balance[symbol][coin]['borrowable'] = borrowable['amount']
+        try:
+            borrowable = await tw(self.get_borrowable, args=(symbol, coin))
+            self.balance[symbol][coin]['borrowable'] = borrowable['amount']
+        except Exception as e:
+            track = traceback.format_exc()
+            print(symbol, coin, e)
+            print(track)
+            self.balance[symbol][coin]['borrowable'] = 0.0
         self.timestamps['released']['update_borrowable'][sc] = time()
 
     async def update_balance(self, symbol: str = None):
@@ -378,21 +382,23 @@ class Bot:
             return
         print_(['updating balance', symbol])
         balances = await tw(self.get_balance, args=(symbol,))
+        await asyncio.create_task(tw(self.dump_balance_log))
         for s in balances:
+            coin, quot = self.symbol_split[s]
             if s not in self.symbols:
                 continue
             try:
-                if self.balance[s][coin]['equity'] != balance[s][coin]['equity'] or \
-                        self.balance[s][quot]['equity'] != balance[s][quot]['equity']:
+                if self.balance[s][coin]['equity'] != balances[s][coin]['equity'] or \
+                        self.balance[s][quot]['equity'] != balances[s][quot]['equity']:
                     await asyncio.gather(*[tw(self.update_open_orders, args=(s,)),
                                            tw(self.update_my_trades, args=(s,)),
                                            tw(self.update_borrowable, args=(s, coin)),
                                            tw(self.update_borrowable, args=(s, quot))])
             except Exception as e:
-                pass
+                track = traceback.format_exc()
+                print('error updating balance', s, e, track)
 
             self.balance[s] = balances[s]
-            self.dump_balance_log(s)
             self.timestamps['released']['update_balance'][s] = time()
 
     async def get_balance(self, symbol: str = None):
@@ -402,7 +408,6 @@ class Bot:
             fetched = await tw(self.cc.sapi_get_margin_isolated_account,
                             kwargs={'params': {'symbols': self.dash_to_nodash[symbol]}})
         balances = {}
-        total_eq_btc = float(fetched['totalNetAssetOfBtc'])
         for e in fetched['assets']:
             balance = {}
             s = self.nodash_to_dash[e['symbol']]
@@ -421,14 +426,15 @@ class Bot:
                 } for k0, k1 in zip([quot, coin], ['quoteAsset', 'baseAsset'])
             }
             balance['equity'] = sum([balance[k]['equity_ito_btc'] for k in [coin, quot]])
-            balance['total_equity'] = total_eq_btc
             try:
                 balance['entry_cost'] = max([
                     self.settings[s]['account_equity_pct_per_entry'] * balance['equity'],
                     self.min_trade_costs[s],
                     10**-self.amount_precisions[s] * self.last_price[s]
                 ])
-            except:
+            except Exception as e:
+                track = traceback.format_exc()
+                print('error getting balance', s, e, track)
                 pass
             balances[s] = balance
         return balances
@@ -580,6 +586,7 @@ class Bot:
         self.timestamps['released']['update_my_trades'][symbol] = time()
 
     def on_update(self, s: str):
+        now_millis = self.cc.milliseconds()
         if self.order_book[s]['bids'][-1]['price'] != self.prev_order_book[s]['bids'][-1]['price']:
             # highest bid changed
             if self.order_book[s]['bids'][-1]['price'] < \
@@ -588,11 +595,18 @@ class Bot:
                 if self.my_bids[s]:
                     if self.order_book[s]['bids'][-1]['price'] < self.my_bids[s][-1]['price']:
                         print_(['bid taken', s])
+                        self.my_trades_analysis['shrt_amount'] = 0.0
+                        self.my_trades_analysis['last_long_entry_ts'] = now_millis
                         asyncio.create_task(tw(self.update_balance, args=(s,)))
                         asyncio.create_task(tw(self.update_open_orders, args=(s,)))
+                        asyncio.create_task(tw(self.update_my_trades, args=(s,)))
                     elif self.order_book[s]['bids'][-1]['price'] == self.my_bids[s][-1]['price']:
                         print_(['bid maybe taken', s])
+                        self.my_trades_analysis['shrt_amount'] = 0.0
+                        self.my_trades_analysis['last_long_entry_ts'] = now_millis
                         asyncio.create_task(tw(self.update_balance, args=(s,)))
+                        #asyncio.create_task(tw(self.update_my_trades, args=(s,)))
+                        #asyncio.create_task(tw(self.update_open_orders, args=(s,)))
         if self.order_book[s]['asks'][0]['price'] != self.prev_order_book[s]['asks'][0]['price']:
             # lowest ask changed
             if self.order_book[s]['asks'][0]['price'] > \
@@ -601,11 +615,19 @@ class Bot:
                 if self.my_asks[s]:
                     if self.order_book[s]['asks'][0]['price'] > self.my_asks[s][0]['price']:
                         print_(['ask taken', s])
+                        self.my_trades_analysis['long_amount'] = 0.0
+                        self.my_trades_analysis['last_shrt_entry_ts'] = now_millis
                         asyncio.create_task(tw(self.update_balance, args=(s,)))
                         asyncio.create_task(tw(self.update_open_orders, args=(s,)))
+                        asyncio.create_task(tw(self.update_my_trades, args=(s,)))
                     elif self.order_book[s]['asks'][0]['price'] == self.my_asks[s][0]['price']:
                         print_(['ask maybe taken', s])
+                        self.my_trades_analysis['long_amount'] = 0.0
+                        self.my_trades_analysis['last_shrt_entry_ts'] = now_millis
                         asyncio.create_task(tw(self.update_balance, args=(s,)))
+                        #asyncio.create_task(tw(self.update_open_orders, args=(s,)))
+                        #asyncio.create_task(tw(self.update_my_trades, args=(s,)))
+
 
         now = time()
         for key0 in ['update_balance', 'update_open_orders', 'update_my_trades']:
@@ -616,12 +638,11 @@ class Bot:
             if now - self.timestamps['released']['update_borrowable'][s + k] > \
                     FORCE_UPDATE_INTERVAL_SECONDS + np.random.choice(np.arange(-60, 60, 1)):
                 asyncio.create_task(tw(self.update_borrowable, args=(s, k)))
-
         asyncio.create_task(tw(self.execute_to_exchange, args=(s,)))
 
     async def execute_to_exchange(self, s: str) -> None:
         now = time()
-        if now - self.timestamps['released']['execute_to_exchange'][s] < 1.0:
+        if now - self.timestamps['released']['execute_to_exchange'][s] < 2.0:
             return
         if self.is_executing('execute_to_exchange', s):
             return
@@ -634,6 +655,12 @@ class Bot:
                 return
         eligible_orders = self.get_ideal_orders(s)
         orders_to_delete, orders_to_create = filter_orders(self.open_orders[s], eligible_orders)
+        if orders_to_delete:
+            print('debug', s, 'to delete', [[e[k] for k in ['side', 'amount', 'price']]
+                                            for e in orders_to_delete])
+        if orders_to_create:
+            print('debug', s, 'to create', [[e[k] for k in ['side', 'amount', 'price']]
+                                            for e in orders_to_create])
         if orders_to_delete:
             asyncio.create_task(tw(self.cancel_order, args=(s, orders_to_delete[0]['order_id'])))
         elif orders_to_create:
@@ -804,6 +831,8 @@ class Bot:
             ) if self.my_trades_analysis[s]['shrt_vwap'] > 0.0 else 1.0
             delay_hours = min(self.my_trades_analysis[s]['last_shrt_entry_cost'], entry_cost) / \
                 (self.settings[s]['account_equity_pct_per_hour'] * self.balance[s]['equity'])
+            #print('delay_hours shrt', delay_hours)
+
             if now_millis - self.my_trades_analysis[s]['last_shrt_entry_ts'] > \
                     (HOUR_TO_MILLIS * delay_hours):
                 shrt_sel_amount = round_up(entry_cost * shrt_amount_modifier / shrt_sel_price,
@@ -863,6 +892,7 @@ class Bot:
             )
             delay_hours = min(self.my_trades_analysis[s]['last_long_entry_cost'], entry_cost) / \
                 (self.settings[s]['account_equity_pct_per_hour'] * self.balance[s]['equity'])
+            #print('delay_hours long', delay_hours)
             if now_millis - self.my_trades_analysis[s]['last_long_entry_ts'] > \
                     (HOUR_TO_MILLIS * delay_hours):
                 long_buy_amount = round_up(entry_cost * long_amount_modifier / long_buy_price,
@@ -913,8 +943,11 @@ class Bot:
             }
 
         c, q = self.symbol_split[s]
-        coin_available = self.balance[s][c]['onhand'] + self.balance[s][c]['borrowable']
-        quot_available = self.balance[s][q]['onhand'] + self.balance[s][q]['borrowable']
+        coin_available = max(0.0, self.balance[s][c]['onhand'] - self.balance[s][c]['debt'])
+        quot_available = max(0.0, self.balance[s][q]['onhand'] - self.balance[s][q]['debt'])
+        coin_credit_available = self.balance[s][c]['borrowable']
+        quot_credit_available = self.balance[s][q]['borrowable']
+
         coin_leftover = self.balance[s][c]['equity']
         quot_leftover = self.balance[s][q]['equity']
         min_exit_cost = self.balance[s]['entry_cost'] * self.settings[s]['min_exit_cost_multiplier']
@@ -926,12 +959,24 @@ class Bot:
                 quot_available -= cost
                 quot_leftover -= cost
             else:
-                new_amount = round_dn(quot_available / o['price'], self.price_precisions[s])
-                if (new_cost := new_amount * o['price']) > self.min_trade_costs[s]:
-                    o['amount'] = new_amount
+                quot_plus_credit = quot_available + quot_credit_available
+                if quot_available + quot_credit_available >= cost:
                     eligible_orders.append(o)
-                    quot_available -= new_cost
-                    quot_leftover -= new_cost
+                    credit_spent = cost - quot_available
+                    quot_credit_available -= credit_spent
+                    coin_credit_available -= credit_spent / o['price']
+                    quot_available = 0.0
+                    quot_leftover -= cost
+                else:
+                    new_amount = round_dn(quot_plus_credit / o['price'],
+                                          self.amount_precisions[s])
+                    if (new_cost := new_amount * o['price']) > self.min_trade_costs[s]:
+                        o['amount'] = new_amount
+                        eligible_orders.append(o)
+                        quot_available = 0.0
+                        quot_credit_available = 0.0
+                        coin_credit_available = 0.0
+                        quot_leftover = 0.0
         o = self.ideal_orders[s]['shrt_sel']
         if (cost := o['price'] * o['amount']) > self.min_trade_costs[s]:
             if coin_available >= o['amount']:
@@ -939,12 +984,24 @@ class Bot:
                 coin_available -= o['amount']
                 coin_leftover -= o['amount']
             else:
-                new_amount = round_dn(coin_available, self.price_precisions[s])
-                if new_amount * o['price'] > self.min_trade_costs[s]:
-                    o['amount'] = new_amount
+                coin_plus_credit = coin_available + coin_credit_available
+                if coin_plus_credit >= o['amount']:
                     eligible_orders.append(o)
-                    coin_available -= new_amount
-                    coin_leftover -= new_amount
+                    credit_spent = o['amount'] - coin_available
+                    coin_credit_available -= credit_spent
+                    quot_credit_available -= credit_spent * o['price']
+                    coin_available = 0.0
+                    coin_leftover = o['amount']
+                else:
+                    new_amount = round_dn(coin_plus_credit, self.amount_precisions[s])
+                    if new_amount * o['price'] > self.min_trade_costs[s]:
+                        o['amount'] = new_amount
+                        eligible_orders.append(o)
+
+                        coin_available = 0.0
+                        coin_credit_available = 0.0
+                        quot_credit_available = 0.0
+                        coin_leftover = 0.0
         o = self.ideal_orders[s]['long_sel']
         if (cost := o['price'] * o['amount']) > self.min_trade_costs[s]:
             if coin_available >= o['amount']:
@@ -952,26 +1009,53 @@ class Bot:
                 coin_available -= o['amount']
                 coin_leftover -= o['amount']
             else:
-                new_amount = round_dn(coin_available, self.price_precisions[s])
-                if new_amount * o['price'] > min_exit_cost:
-                    o['amount'] = new_amount
+                coin_plus_credit = coin_available + coin_credit_available
+                if coin_plus_credit >= o['amount']:
                     eligible_orders.append(o)
-                    coin_available -= new_amount
-                    coin_leftover -= new_amount
+                    credit_spent = o['amount'] - coin_available
+                    coin_credit_available -= credit_spent
+                    quot_credit_available -= credit_spent * o['price']
+                    coin_available = 0.0
+                    coin_leftover = o['amount']
+                else:
+                    new_amount = round_dn(coin_plus_credit, self.amount_precisions[s])
+                    if new_amount * o['price'] > min_exit_cost:
+                        o['amount'] = new_amount
+                        eligible_orders.append(o)
+                        coin_available = 0.0
+                        coin_credit_available = 0.0
+                        quot_credit_available = 0.0
+                        coin_leftover = 0.0
         o = self.ideal_orders[s]['shrt_buy']
         if (cost := o['price'] * o['amount']) > min_exit_cost:
+
+
+
+
             if quot_available >= cost:
                 eligible_orders.append(o)
                 quot_available -= cost
                 quot_leftover -= cost
-
             else:
-                new_amount = round_dn(quot_available / o['price'], self.price_precisions[s])
-                if (new_cost := new_amount * o['price']) > min_exit_cost:
-                    o['amount'] = new_amount
+                quot_plus_credit = quot_available + quot_credit_available
+                if quot_available + quot_credit_available >= cost:
                     eligible_orders.append(o)
-                    quot_available -= new_cost
-                    quot_leftover -= new_cost
+                    credit_spent = cost - quot_available
+                    quot_credit_available -= credit_spent
+                    coin_credit_available -= credit_spent / o['price']
+                    quot_available = 0.0
+                    quot_leftover -= cost
+                else:
+                    new_amount = round_dn(quot_plus_credit / o['price'],
+                                          self.amount_precisions[s])
+                    if (new_cost := new_amount * o['price']) > min_exit_cost:
+                        o['amount'] = new_amount
+                        eligible_orders.append(o)
+                        quot_available = 0.0
+                        quot_credit_available = 0.0
+                        coin_credit_available = 0.0
+                        quot_leftover = 0.0
+
         '''
         if coin_leftover * \
                 (liqui_price := max(self.ideal_orders[s]['long_sel']['price'], shrt_sel_price)) > \
@@ -986,18 +1070,21 @@ class Bot:
         return eligible_orders
 
 
-    def dump_balance_log(self, s: str):
-        now = time()
-        if now - self.timestamps['locked']['dump_balance_log'][s] < 60 * 60:
+    async def dump_balance_log(self):
+        interval = 60 * 60
+        if self.is_executing('dump_balance_log', 'dump_balance_log'):
             return
-        print_(['dumping balance', s])
+        if time() - self.timestamps['released']['dump_balance_log']['dump_balance_log'] < interval:
+            return
+        print_(['dumping balance log'])
         filepath = make_get_filepath(
-            f'logs/binance/{self.user}/isolated_margin_balances/{self.dash_to_nodash[s]}.txt'
+            f'logs/binance/{self.user}/isolated_margin_balances/balances.txt'
         )
+        balance = await self.get_balance()
         with open(filepath, 'a') as f:
-            line = json.dumps({**{'timestamp': self.cc.milliseconds()}, **self.balance[s]}) + '\n'
+            line = json.dumps({**{'timestamp': self.cc.milliseconds()}, **balance}) + '\n'
             f.write(line)
-        self.timestamps['locked']['dump_balance_log'][s] = now
+        self.timestamps['released']['dump_balance_log']['dump_balance_log'] = time()
 
 
 ####################################################################################################
