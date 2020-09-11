@@ -577,12 +577,16 @@ class Bot:
                          -bag_ratio_m))) * analysis['long_vwap'],
             self.price_precisions[symbol]
         )
+        if analysis['long_sel_price'] > self.last_price[symbol] * 1.2:
+            analysis['long_sel_price'] = 0.0
         analysis['shrt_buy_price'] = round_dn(
             (1 - min(self.settings[symbol]['max_profit_pct'],
                      max(self.settings[symbol]['min_profit_pct'],
                          bag_ratio_m))) * analysis['shrt_vwap'],
             self.price_precisions[symbol]
         )
+        if analysis['shrt_buy_price'] < self.last_price[symbol] / 1.2:
+            analysis['shrt_buy_price'] = 0.0
         self.my_trades_analysis[symbol] = analysis
         self.my_trades[symbol] = my_trades
         self.timestamps['released']['update_my_trades'][symbol] = time()
@@ -668,10 +672,15 @@ class Bot:
         elif orders_to_create:
             o = orders_to_create[0]
             if o['side'] == 'buy':
-                if len(self.my_bids[s]) < 2:
+                if len(self.my_bids[s]) < 3:
+                    if 'liquidate' in o:
+                        print_([f'{s} out of balance, too little {self.s2c[s]},'
+                                'creating extra bid'])
                     asyncio.create_task(tw(self.create_bid, args=(s, o['amount'], o['price'])))
             elif o['side'] == 'sell':
                 if len(self.my_asks[s]) < 3:
+                    if 'liquidate' in o:
+                        print_([f'{s} out of balance, too much {self.s2c[s]}, creating extra ask'])
                     asyncio.create_task(tw(self.create_ask, args=(s, o['amount'], o['price'])))
         '''
         for o in orders_to_delete[:2]:
@@ -950,8 +959,6 @@ class Bot:
         coin_credit_available = self.balance[s][c]['borrowable']
         quot_credit_available = self.balance[s][q]['borrowable']
 
-        coin_leftover = self.balance[s][c]['equity']
-        quot_leftover = self.balance[s][q]['equity']
         min_exit_cost = self.balance[s]['entry_cost'] * self.settings[s]['min_exit_cost_multiplier']
         eligible_orders = []
         o = self.ideal_orders[s]['long_buy']
@@ -959,7 +966,6 @@ class Bot:
             if quot_available >= cost:
                 eligible_orders.append(o)
                 quot_available -= cost
-                quot_leftover -= cost
             else:
                 quot_plus_credit = quot_available + quot_credit_available
                 if quot_available + quot_credit_available >= cost:
@@ -968,7 +974,6 @@ class Bot:
                     quot_credit_available -= credit_spent
                     coin_credit_available -= credit_spent / o['price']
                     quot_available = 0.0
-                    quot_leftover -= cost
                 else:
                     new_amount = round_dn(quot_plus_credit / o['price'],
                                           self.amount_precisions[s])
@@ -978,13 +983,11 @@ class Bot:
                         quot_available = 0.0
                         quot_credit_available = 0.0
                         coin_credit_available = 0.0
-                        quot_leftover = 0.0
         o = self.ideal_orders[s]['shrt_sel']
         if (cost := o['price'] * o['amount']) > self.min_trade_costs[s]:
             if coin_available >= o['amount']:
                 eligible_orders.append(o)
                 coin_available -= o['amount']
-                coin_leftover -= o['amount']
             else:
                 coin_plus_credit = coin_available + coin_credit_available
                 if coin_plus_credit >= o['amount']:
@@ -993,7 +996,6 @@ class Bot:
                     coin_credit_available -= credit_spent
                     quot_credit_available -= credit_spent * o['price']
                     coin_available = 0.0
-                    coin_leftover = o['amount']
                 else:
                     new_amount = round_dn(coin_plus_credit, self.amount_precisions[s])
                     if new_amount * o['price'] > self.min_trade_costs[s]:
@@ -1003,13 +1005,11 @@ class Bot:
                         coin_available = 0.0
                         coin_credit_available = 0.0
                         quot_credit_available = 0.0
-                        coin_leftover = 0.0
         o = self.ideal_orders[s]['long_sel']
         if (cost := o['price'] * o['amount']) > self.min_trade_costs[s]:
             if coin_available >= o['amount']:
                 eligible_orders.append(o)
                 coin_available -= o['amount']
-                coin_leftover -= o['amount']
             else:
                 coin_plus_credit = coin_available + coin_credit_available
                 if coin_plus_credit >= o['amount']:
@@ -1018,7 +1018,6 @@ class Bot:
                     coin_credit_available -= credit_spent
                     quot_credit_available -= credit_spent * o['price']
                     coin_available = 0.0
-                    coin_leftover = o['amount']
                 else:
                     new_amount = round_dn(coin_plus_credit, self.amount_precisions[s])
                     if new_amount * o['price'] > min_exit_cost:
@@ -1027,17 +1026,11 @@ class Bot:
                         coin_available = 0.0
                         coin_credit_available = 0.0
                         quot_credit_available = 0.0
-                        coin_leftover = 0.0
         o = self.ideal_orders[s]['shrt_buy']
         if (cost := o['price'] * o['amount']) > min_exit_cost:
-
-
-
-
             if quot_available >= cost:
                 eligible_orders.append(o)
                 quot_available -= cost
-                quot_leftover -= cost
             else:
                 quot_plus_credit = quot_available + quot_credit_available
                 if quot_available + quot_credit_available >= cost:
@@ -1046,7 +1039,6 @@ class Bot:
                     quot_credit_available -= credit_spent
                     coin_credit_available -= credit_spent / o['price']
                     quot_available = 0.0
-                    quot_leftover -= cost
                 else:
                     new_amount = round_dn(quot_plus_credit / o['price'],
                                           self.amount_precisions[s])
@@ -1056,19 +1048,39 @@ class Bot:
                         quot_available = 0.0
                         quot_credit_available = 0.0
                         coin_credit_available = 0.0
-                        quot_leftover = 0.0
 
-        '''
-        if coin_leftover * \
-                (liqui_price := max(self.ideal_orders[s]['long_sel']['price'], shrt_sel_price)) > \
-                min_exit_cost:
-            eligible_orders.append({
-                'symbol': s,
-                'side': 'sell',
-                'amount': round_up(min_exit_cost / shrt_sel_price, self.amount_precisions[s]),
-                'price': liqui_price,
-            })
-        '''
+        # extra order to liquidate coin equity
+
+        extra_coin = (self.balance[s][c]['equity'] +
+                      self.my_trades_analysis[s]['shrt_amount'] -
+                      self.my_trades_analysis[s]['long_amount'] +
+                      self.ideal_orders[s]['long_buy']['amount'] -
+                      self.ideal_orders[s]['shrt_sel']['amount'])
+
+
+        if extra_coin > 0.0:
+            liqui_price = max(self.ideal_orders[s]['long_sel']['price'], shrt_sel_price)
+            if extra_coin * liqui_price > min_exit_cost:
+                print_([f'{extra_coin:.4f} {c} leftover, creating extra ask'])
+                eligible_orders.append({
+                    'symbol': s,
+                    'side': 'sell',
+                    'amount': round_up(min_exit_cost / liqui_price, self.amount_precisions[s]),
+                    'price': liqui_price,
+                    'liquidate': True,
+                })
+        else:
+            liqui_price = min(self.ideal_orders[s]['shrt_buy']['price'], long_buy_price) if \
+                self.ideal_orders[s]['shrt_buy']['price'] > 0.0 else long_buy_price
+            if -extra_coin * liqui_price > min_exit_cost:
+                print_([f'{extra_coin:.4f} {c} leftover, creating extra bid'])
+                eligible_orders.append({
+                    'symbol': s,
+                    'side': 'buy',
+                    'amount': round_up(min_exit_cost / liqui_price, self.amount_precisions[s]),
+                    'price': liqui_price,
+                    'liquidate': True,
+                })
         return eligible_orders
 
 
@@ -1119,8 +1131,16 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
     last_long_entry_ts, last_shrt_entry_ts = 0, 0
     last_long_entry_cost, last_shrt_entry_cost = 1e-10, 1e-10
 
+    buy_cost, buy_amount = 0.0, 0.0
+    sel_cost, sel_amount = 0.0, 0.0
+    sum_cost, sum_amount = 0.0, 0.0
+
     for mt in my_trades:
         if mt['side'] == 'buy':
+            sum_cost += mt['cost']
+            sum_amount += mt['amount']
+            buy_cost += mt['cost']
+            buy_amount += mt['amount']
             if mt['amount'] < entry_exit_amount_threshold:
                 # long buy
                 long_amount += mt['amount']
@@ -1136,6 +1156,10 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
                     shrt_amount = 0.0
                     shrt_cost = 0.0
         else:
+            sum_cost -= mt['cost']
+            sum_amount -= mt['amount']
+            sel_cost += mt['cost']
+            sel_amount += mt['amount']
             if mt['amount'] < entry_exit_amount_threshold:
                 # shrt sel
                 shrt_amount += mt['amount']
@@ -1157,6 +1181,9 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
                 'shrt_amount': shrt_amount,
                 'shrt_cost': shrt_cost,
                 'shrt_vwap': shrt_cost / shrt_amount if shrt_amount else 0.0,
+                'buy_vwap': buy_cost / buy_amount if buy_amount else 0.0,
+                'sel_vwap': sel_cost / sel_amount if sel_amount else 0.0,
+                'sum_vwap': sum_cost / sum_amount if sum_amount else 0.0,
                 'long_start_ts': long_start_ts,
                 'shrt_start_ts': shrt_start_ts,
                 'last_long_entry_ts': last_long_entry_ts,
