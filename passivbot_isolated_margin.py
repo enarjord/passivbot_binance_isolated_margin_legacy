@@ -19,6 +19,7 @@ import ccxt.async_support as ccxt_async
 
 
 HOUR_TO_MILLIS = 60 * 60 * 1000
+DAY_TO_MILLIS = HOUR_TO_MILLIS * 24
 FORCE_UPDATE_INTERVAL_SECONDS = 60 * 4
 MAX_ORDERS_PER_24H = 200000
 MAX_ORDERS_PER_10M = MAX_ORDERS_PER_24H / 24 / 6
@@ -29,7 +30,8 @@ DEFAULT_TIMEOUT = 10
 def load_settings(user: str):
     try:
         settings = json.load(open(f'settings/binance_isolated_margin/{user}.json'))
-    except:
+    except Exception as e:
+        print(e)
         print_([f'user {user} not found, using default settings'])
         settings = json.load(open('settings/binance_isolated_margin/default.json'))
     settings['user'] = user
@@ -102,7 +104,8 @@ class Bot:
 
         now_m2 = time() - 2
         scs = flatten([[s + c for c in self.symbol_split[s]] for s in self.symbols])
-        self.timestamps = {'locked': {'update_balance': {s: now_m2 for s in self.symbols},
+        self.timestamps = {'locked': {'update_balance': {s: now_m2
+                                                         for s in list(self.symbols) + ['all']},
                                       'update_open_orders': {s: now_m2 for s in self.symbols},
                                       'update_borrowable': {sc: now_m2 for sc in scs},
                                       'update_my_trades': {s: now_m2 for s in self.symbols},
@@ -118,6 +121,10 @@ class Bot:
                                        for k0 in self.timestamps['locked']}
         tickers = await self.cc.fetch_tickers()
         self.last_price = {s_: tickers[s_]['last'] for s_ in tickers if tickers[s_]['last'] > 0.0}
+        self.conversion_costs = defaultdict(dict)
+        self.order_book = {s: {'s': s, 'bids': [], 'asks': []} for s in self.symbols}
+        self.prev_order_book = self.order_book.copy()
+        await asyncio.gather(*[self.init_ema(s) for s in self.symbols])
 
         await self.update_balance()
         for s in list(self.symbols):
@@ -138,12 +145,8 @@ class Bot:
             s.replace('/', '').lower() + f'@depth{self.depth_levels}': s
             for s in self.symbols
         }
-        self.order_book = {s: {'s': s, 'bids': [], 'asks': []} for s in self.symbols}
-        self.prev_order_book = self.order_book.copy()
         self.stream_tick_ts = 0
-        self.conversion_costs = defaultdict(dict)
 
-        await asyncio.gather(*[self.init_ema(s) for s in self.symbols])
         await asyncio.gather(*flatten([[self.update_borrowable(s, self.s2c[s]),
                                         self.update_borrowable(s, self.quot)]
                                        for s in self.symbols]))
@@ -366,12 +369,19 @@ class Bot:
 
     async def update_borrowable(self, symbol: str, coin: str):
         sc = symbol + coin
+        _, quot = self.symbol_split[symbol]
         if self.is_executing('update_borrowable', sc):
             return
         print_(['updating borrowable', symbol, coin])
         try:
-            borrowable = await tw(self.get_borrowable, args=(symbol, coin))
-            self.balance[symbol][coin]['borrowable'] = borrowable['amount']
+            fetched = await tw(self.get_borrowable, args=(symbol, coin))
+            borrowable_ito_quot = max(0.0, (self.balance[symbol]['equity'] *
+                                            (self.settings[symbol]['max_leverage'] - 1) -
+                                             self.balance[symbol]['debt']))
+            self.balance[symbol][coin]['borrowable'] = min(
+                fetched['amount'],
+                self.convert_amount(borrowable_ito_quot, quot, coin)
+            )
         except Exception as e:
             track = traceback.format_exc()
             print(symbol, coin, e)
@@ -380,9 +390,18 @@ class Bot:
         self.timestamps['released']['update_borrowable'][sc] = time()
 
     async def update_balance(self, symbol: str = None):
-        if symbol is not None and self.is_executing('update_balance', symbol):
-            return
-        print_(['updating balance', symbol])
+        if symbol is None:
+            if self.is_executing('update_balance', 'all'):
+                return
+            print_(['updating all balances'])
+            now = time()
+            for s in self.symbols:
+                self.timestamps['locked']['update_balance'][s] = now
+        else:
+            if self.is_executing('update_balance', symbol):
+                return
+            else:
+                print_(['updating balance', symbol])
         balances = await tw(self.get_balance, args=(symbol,))
         await asyncio.create_task(tw(self.dump_balance_log))
         for s in balances:
@@ -398,18 +417,27 @@ class Bot:
                                            tw(self.update_borrowable, args=(s, quot))])
             except Exception as e:
                 track = traceback.format_exc()
-                print('error updating balance', s, e, track)
+                #print('error updating balance', s, e, track)
 
             self.balance[s] = balances[s]
             self.timestamps['released']['update_balance'][s] = time()
+        if symbol is None:
+            self.timestamps['released']['update_balance']['all'] = time()
 
     async def get_balance(self, symbol: str = None):
+        balances = {}
         if symbol is None:
             fetched = await tw(self.cc.sapi_get_margin_isolated_account)
+            total_account_equity = float(fetched['totalNetAssetOfBtc'])
+            total_account_debt = float(fetched['totalLiabilityOfBtc'])
+            total_account_onhand = float(fetched['totalAssetOfBtc'])
         else:
             fetched = await tw(self.cc.sapi_get_margin_isolated_account,
                             kwargs={'params': {'symbols': self.dash_to_nodash[symbol]}})
-        balances = {}
+            total_account_equity = None
+            total_account_debt = None
+            total_account_onhand = None
+
         for e in fetched['assets']:
             balance = {}
             s = self.nodash_to_dash[e['symbol']]
@@ -428,15 +456,30 @@ class Bot:
                 } for k0, k1 in zip([quot, coin], ['quoteAsset', 'baseAsset'])
             }
             balance['equity'] = sum([balance[k]['equity_ito_btc'] for k in [coin, quot]])
+            if total_account_equity:
+                balance['total_account_equity'] = total_account_equity
+                balance['total_account_debt'] = total_account_debt
+                balance['total_account_onhand'] = total_account_onhand
+            elif 'total_account_equity' not in self.balance[s]:
+                balance['total_account_equity'] = 1e-10
+                balance['total_account_debt'] = 1e-10
+                balance['total_account_onhand'] = 1e-10
+            else:
+                balance['total_account_equity'] = self.balance[s]['total_account_equity']
+                balance['total_account_debt'] = self.balance[s]['total_account_debt']
+                balance['total_account_onhand'] = self.balance[s]['total_account_onhand']
             try:
+                balance['debt'] = (self.convert_amount(balance[coin]['debt'], coin, quot) +
+                                   balance[quot]['debt'])
                 balance['entry_cost'] = max([
-                    self.settings[s]['account_equity_pct_per_entry'] * balance['equity'],
+                    (self.settings[s]['account_equity_pct_per_entry'] *
+                     balance['total_account_equity']),
                     self.min_trade_costs[s],
                     10**-self.amount_precisions[s] * self.last_price[s]
                 ])
             except Exception as e:
-                track = traceback.format_exc()
-                print('error getting balance', s, e, track)
+                # track = traceback.format_exc()
+                # print('error getting balance', s, e, track)
                 pass
             balances[s] = balance
         return balances
@@ -566,27 +609,31 @@ class Bot:
                                        self.last_price[symbol])
         my_trades, analysis = \
             analyze_my_trades([e for e in mts if e['timestamp'] > age_limit_millis],
+                              self.balance[symbol]['entry_cost'],
                               entry_exit_amount_threshold)
+        '''
+
         c, q = self.symbol_split[symbol]
         bag_ratio = ((analysis['long_cost'] - analysis['shrt_cost']) /
                      self.balance[symbol]['equity'])
-        bag_ratio_m = bag_ratio * self.settings[symbol]['profit_pct_multiplier']
+        bag_ratio_m = bag_ratio * self.settings[symbol]['markup_pct_multiplier']
         analysis['long_sel_price'] = round_up(
-            (1 + min(self.settings[symbol]['max_profit_pct'],
-                     max(self.settings[symbol]['min_profit_pct'],
+            (1 + min(self.settings[symbol]['max_markup_pct'],
+                     max(self.settings[symbol]['min_markup_pct'],
                          -bag_ratio_m))) * analysis['long_vwap'],
             self.price_precisions[symbol]
         )
         if analysis['long_sel_price'] > self.last_price[symbol] * 1.2:
             analysis['long_sel_price'] = 0.0
         analysis['shrt_buy_price'] = round_dn(
-            (1 - min(self.settings[symbol]['max_profit_pct'],
-                     max(self.settings[symbol]['min_profit_pct'],
+            (1 - min(self.settings[symbol]['max_markup_pct'],
+                     max(self.settings[symbol]['min_markup_pct'],
                          bag_ratio_m))) * analysis['shrt_vwap'],
             self.price_precisions[symbol]
         )
         if analysis['shrt_buy_price'] < self.last_price[symbol] / 1.2:
             analysis['shrt_buy_price'] = 0.0
+        '''
         self.my_trades_analysis[symbol] = analysis
         self.my_trades[symbol] = my_trades
         self.timestamps['released']['update_my_trades'][symbol] = time()
@@ -636,6 +683,9 @@ class Bot:
 
 
         now = time()
+        if now - self.timestamps['released']['update_balance']['all'] > \
+                FORCE_UPDATE_INTERVAL_SECONDS:
+            asyncio.create_task(tw(self.update_balance))
         for key0 in ['update_balance', 'update_open_orders', 'update_my_trades']:
             if now - self.timestamps['released'][key0][s] > \
                     FORCE_UPDATE_INTERVAL_SECONDS + np.random.choice(np.arange(-60, 60, 1)):
@@ -661,12 +711,14 @@ class Bot:
                 return
         eligible_orders = self.get_ideal_orders(s)
         orders_to_delete, orders_to_create = filter_orders(self.open_orders[s], eligible_orders)
+        '''
         if orders_to_delete:
             print_(['debug', s, 'to delete', [[e[k] for k in ['side', 'amount', 'price']]
                                               for e in orders_to_delete]])
         if orders_to_create:
             print_(['debug', s, 'to create', [[e[k] for k in ['side', 'amount', 'price']]
                                               for e in orders_to_create]])
+        '''
         if orders_to_delete:
             asyncio.create_task(tw(self.cancel_order, args=(s, orders_to_delete[0]['order_id'])))
         elif orders_to_create:
@@ -770,7 +822,6 @@ class Bot:
         self.min_ema[symbol] = min(self.emas[symbol].values())
         self.max_ema[symbol] = max(self.emas[symbol].values())
         self.ema_second[symbol] = int(time())
-        self.last_price[symbol] = closes[-1]
         coin, quot = self.symbol_split[symbol]
         self.conversion_costs[coin][quot] = closes[-1]
         self.conversion_costs[quot][coin] = 1.0 / closes[-1]
@@ -837,13 +888,13 @@ class Bot:
                 min(
                     self.settings[s]['min_exit_cost_multiplier'] / 2,
                     (self.last_price[s] /
-                     self.my_trades_analysis[s]['shrt_vwap'])**exponent
+                     (self.my_trades_analysis[s]['shrt_vwap'] if
+                      self.my_trades_analysis[s]['shrt_vwap'] else self.last_price[s]))**exponent
                 )
             ) if self.my_trades_analysis[s]['shrt_vwap'] > 0.0 else 1.0
             delay_hours = min(self.my_trades_analysis[s]['last_shrt_entry_cost'], entry_cost) / \
-                (self.settings[s]['account_equity_pct_per_hour'] * self.balance[s]['equity'])
-            #print('delay_hours shrt', delay_hours)
-
+                (self.settings[s]['account_equity_pct_per_hour'] *
+                 self.balance[s]['total_account_equity'])
             if now_millis - self.my_trades_analysis[s]['last_shrt_entry_ts'] > \
                     (HOUR_TO_MILLIS * delay_hours):
                 shrt_sel_amount = round_up(entry_cost * shrt_amount_modifier / shrt_sel_price,
@@ -868,12 +919,23 @@ class Bot:
                 }
             shrt_buy_amount = round_up(self.my_trades_analysis[s]['shrt_amount'],
                                        self.amount_precisions[s])
-            shrt_buy_price =  min([round_dn(self.min_ema[s], self.price_precisions[s]),
-                                   other_ask_decr,
-                                   (other_bid_incr if shrt_buy_amount < highest_other_bid['amount']
-                                    else highest_other_bid['price']),
-                                   self.my_trades_analysis[s]['shrt_buy_price']])
-            if shrt_buy_amount * shrt_buy_price > min_exit_cost:
+            shrt_bag_duration_days = \
+                (now_millis - self.my_trades_analysis[s]['shrt_start_ts']) / DAY_TO_MILLIS
+            shrt_vwap_multiplier = 1 - max(
+                self.settings[s]['min_markup_pct'],
+                ((self.settings[s]['n_days_to_min_markup'] - shrt_bag_duration_days) /
+                 self.settings[s]['n_days_to_min_markup']) * self.settings[s]['max_markup_pct']
+            )
+            shrt_buy_price = min([
+                round_dn(min(self.min_ema[s],
+                             self.my_trades_analysis[s]['shrt_vwap'] * shrt_vwap_multiplier),
+                         self.price_precisions[s]),
+                other_ask_decr,
+                (other_bid_incr if shrt_buy_amount < highest_other_bid['amount']
+                 else highest_other_bid['price'])
+            ])
+            if shrt_buy_amount * shrt_buy_price > min_exit_cost and \
+                    shrt_buy_price > self.last_price[s] * 0.9:
                 self.ideal_orders[s]['shrt_buy'] = {'symbol': s, 'side': 'buy',
                                                     'amount': shrt_buy_amount,
                                                     'price': shrt_buy_price}
@@ -902,8 +964,8 @@ class Bot:
                 )
             )
             delay_hours = min(self.my_trades_analysis[s]['last_long_entry_cost'], entry_cost) / \
-                (self.settings[s]['account_equity_pct_per_hour'] * self.balance[s]['equity'])
-            #print('delay_hours long', delay_hours)
+                (self.settings[s]['account_equity_pct_per_hour'] *
+                 self.balance[s]['total_account_equity'])
             if now_millis - self.my_trades_analysis[s]['last_long_entry_ts'] > \
                     (HOUR_TO_MILLIS * delay_hours):
                 long_buy_amount = round_up(entry_cost * long_amount_modifier / long_buy_price,
@@ -928,12 +990,23 @@ class Bot:
                 }
             long_sel_amount = round_up(self.my_trades_analysis[s]['long_amount'],
                                        self.amount_precisions[s])
-            long_sel_price = max([round_up(self.max_ema[s], self.price_precisions[s]),
-                                  other_bid_incr,
-                                  (other_ask_decr if long_sel_amount < lowest_other_ask['amount']
-                                   else lowest_other_ask['price']),
-                                  self.my_trades_analysis[s]['long_sel_price']])
-            if long_sel_amount * long_sel_price > min_exit_cost:
+            long_bag_duration_days = \
+                (now_millis - self.my_trades_analysis[s]['long_start_ts']) / DAY_TO_MILLIS
+            long_vwap_multiplier = 1 + max(
+                self.settings[s]['min_markup_pct'],
+                ((self.settings[s]['n_days_to_min_markup'] - long_bag_duration_days) /
+                 self.settings[s]['n_days_to_min_markup']) * self.settings[s]['max_markup_pct']
+            )
+            long_sel_price = max([
+                round_up(max(self.max_ema[s],
+                             self.my_trades_analysis[s]['long_vwap'] * long_vwap_multiplier),
+                         self.price_precisions[s]),
+                other_bid_incr,
+                (other_ask_decr if long_sel_amount < lowest_other_ask['amount']
+                 else lowest_other_ask['price'])
+            ])
+            if long_sel_amount * long_sel_price > min_exit_cost and \
+                    long_sel_price < self.last_price[s] * 1.1:
                 self.ideal_orders[s]['long_sel'] = {'symbol': s, 'side': 'sell',
                                                     'amount': long_sel_amount,
                                                     'price': long_sel_price}
@@ -1051,33 +1124,43 @@ class Bot:
 
         # extra order to liquidate coin equity
 
-        extra_coin = (self.balance[s][c]['equity'] +
-                      self.my_trades_analysis[s]['shrt_amount'] -
-                      self.my_trades_analysis[s]['long_amount'] +
-                      self.ideal_orders[s]['long_buy']['amount'] -
-                      self.ideal_orders[s]['shrt_sel']['amount'])
-
+        if not self.settings[s]['long'] and not self.settings[s]['shrt']:
+            extra_coin = self.balance[s][c]['equity']
+        else:
+            extra_coin = (self.balance[s][c]['equity'] +
+                          self.my_trades_analysis[s]['shrt_amount'] -
+                          self.my_trades_analysis[s]['long_amount'] +
+                          self.ideal_orders[s]['long_buy']['amount'] -
+                          self.ideal_orders[s]['shrt_sel']['amount'])
 
         if extra_coin > 0.0:
             liqui_price = max(self.ideal_orders[s]['long_sel']['price'], shrt_sel_price)
-            if extra_coin * liqui_price > min_exit_cost:
-                print_([f'{extra_coin:.4f} {c} leftover, creating extra ask'])
+            liqui_amount = round_up(min(min_exit_cost / liqui_price, extra_coin),
+                                    self.amount_precisions[s])
+            if extra_coin * liqui_price > min_exit_cost or \
+                    (not self.settings[s]['long'] and
+                     liqui_amount * liqui_price > self.min_trade_costs[s]):
+                #print_([f'{extra_coin:.4f} {c} leftover, creating extra ask'])
                 eligible_orders.append({
                     'symbol': s,
                     'side': 'sell',
-                    'amount': round_up(min_exit_cost / liqui_price, self.amount_precisions[s]),
+                    'amount': liqui_amount,
                     'price': liqui_price,
                     'liquidate': True,
                 })
         else:
             liqui_price = min(self.ideal_orders[s]['shrt_buy']['price'], long_buy_price) if \
                 self.ideal_orders[s]['shrt_buy']['price'] > 0.0 else long_buy_price
-            if -extra_coin * liqui_price > min_exit_cost:
-                print_([f'{extra_coin:.4f} {c} leftover, creating extra bid'])
+            liqui_amount = round_up(min(min_exit_cost / liqui_price, -extra_coin),
+                                    self.amount_precisions[s])
+            if -extra_coin * liqui_price > min_exit_cost or \
+                    (not self.settings[s]['shrt'] and
+                     liqui_amount * liqui_price > self.min_trade_costs[s]):
+                #print_([f'{extra_coin:.4f} {c} leftover, creating extra bid'])
                 eligible_orders.append({
                     'symbol': s,
                     'side': 'buy',
-                    'amount': round_up(min_exit_cost / liqui_price, self.amount_precisions[s]),
+                    'amount': liqui_amount,
                     'price': liqui_price,
                     'liquidate': True,
                 })
@@ -1122,13 +1205,16 @@ def calc_other_orders(my_orders: [dict],
             for p in sorted(other_orders)]
 
 
-def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> ([dict], dict):
+def analyze_my_trades(my_trades: [dict],
+                      entry_cost: float,
+                      entry_exit_amount_threshold: float) -> ([dict], dict):
 
     long_cost, long_amount = 0.0, 0.0
     shrt_cost, shrt_amount = 0.0, 0.0
 
     long_start_ts, shrt_start_ts = 0, 0
     last_long_entry_ts, last_shrt_entry_ts = 0, 0
+    last_long_exit_ts, last_shrt_exit_ts = 0, 0
     last_long_entry_cost, last_shrt_entry_cost = 1e-10, 1e-10
 
     buy_cost, buy_amount = 0.0, 0.0
@@ -1151,7 +1237,7 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
                 # shrt buy
                 shrt_amount -= mt['amount']
                 shrt_cost -= mt['cost']
-                if shrt_amount <= 0.0 or shrt_cost <= 0.0:
+                if shrt_amount < entry_cost / mt['price'] or shrt_cost < entry_cost:
                     shrt_start_ts = mt['timestamp']
                     shrt_amount = 0.0
                     shrt_cost = 0.0
@@ -1170,7 +1256,7 @@ def analyze_my_trades(my_trades: [dict], entry_exit_amount_threshold: float) -> 
                 # long sel
                 long_amount -= mt['amount']
                 long_cost -= mt['cost']
-                if long_amount <= 0.0 or long_cost <= 0.0:
+                if long_amount < entry_cost / mt['price'] or long_cost < entry_cost:
                     long_start_ts = mt['timestamp']
                     long_amount = 0.0
                     long_cost = 0.0
@@ -1221,7 +1307,9 @@ def filter_orders(actual_orders: [dict],
 
 
 async def main():
-    settings = load_settings(sys.argv[1])
+    user = sys.argv[1]
+    print('user', user)
+    settings = load_settings(user)
     bot = await create_bot(settings)
     try:
         await bot.start()
