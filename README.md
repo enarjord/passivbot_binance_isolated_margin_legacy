@@ -1,5 +1,5 @@
 # passivbot
-trading bot running on binance cross margin
+trading bot running on binance isolated margin
 
 
 requires python >= 3.8
@@ -8,13 +8,10 @@ requires python >= 3.8
 dependencies, install with pip:
 
 
-`python3.8 -m pip install matplotlib pandas websockets`
+`python3.8 -m pip install matplotlib pandas websockets ccxt`
 
 
 binance account needs margin enabled,
-works with both 3x and 5x margin
-
-it functions better with > 0.01 BTC to work with
 
 use at own risk
 
@@ -33,7 +30,7 @@ formatted like this:
 
 if using non-default settings, make a copy of
 
-settings/binance/default.json
+settings/binance_isolated_margin/default.json
 
 rename the copy your_user_name.json
 
@@ -48,13 +45,9 @@ consider changing "snapshot_timestamp_millis" from 0 to current unix time in mil
 
 run in terminal:
 
-`python3.8 passivbot.py your_user_name`
+`python3.8 passivbot_isolated_margin.py your_user_name`
 
 
-
-backtester:
-
-open jupyter notebook in the directory and open backtester_notes_rt.ipynb to backtest
 
 ------------------------------------------------------------------
 overview
@@ -70,7 +63,7 @@ it listens to websocket stream and updates its orders continuously
 it will look back in its own trade history and conglomerate all small buys into one big sell, and all small sells into one big buy
 
 it exits longs by summing up all btc spent and all coin acquired on small long buys since previous full long exit,
-placing a big long ask whose price is sum(btc_spent) / sum(coin_acquired) * (1 + 0.0025),
+placing a big long ask whose price is sum(btc_spent) / sum(coin_acquired) * (1 + 0.005),
 
 the big long ask is adjusted after each new long buy
 
@@ -78,20 +71,15 @@ if it runs out of btc, it will borrow btc, and repay btc debt after long positio
 
 inversely,
 it exits shorts by summing up all btc acquired and all coin spent on small short sells since previous full short exit,
-placing a big short bid whose price is sum(btc_acquired) / sum(coin_spent) * (1 - 0.0025)
+placing a big short bid whose price is sum(btc_acquired) / sum(coin_spent) * (1 - 0.005)
 
 when the short exit position is filled, it repays the coin debt
 
 the big short bid is adjusted after each new short sell
 
-by default it will make exits at at least 0.25% markup to cover fees to exchange and profit
+by default it will make exits at at least 0.5% markup to cover fees to exchange and profit
 
-net profit per exit will depend on whether fees are paid with BNB and on vip level:
-
-- with 0.1% fee per trade, exchange takes 1 / ((1 - 0.001)**2) - 1 ~= 0.2%, leaving at least ~0.05% profit per exit
-- with 0.075% fee per trade, exchange takes 1 / ((1 - 0.00075)**2) - 1 ~= 0.15%, leaving at least ~0.1% profit per exit
-- with 0.0675% fee per trade, exchange takes 1 / ((1 - 0.000675)**2) - 1 ~= 0.135%, leaving at least ~0.115% profit per exit
-- etc.
+net profit per exit will depend on whether fees are paid with BNB and on vip level
 
 
 interest paid on loans from exchange will also reduce profits
@@ -122,59 +110,50 @@ the size of its bids and asks scale with account equity
 
 about the settings:
 
-    "quot": "BTC",                                  # the coin to accumulate, only tested with BTC
-    "coins": {
-        "ADA": {
-            "long": true,                           # do long
-            "shrt": true,                           # do short
-                                                    # if both "long" and "shrt" are false, the bot will gradually liquidate coin
-            "account_equity_pct_per_hour": 0.0005,  # max percentage of total account equity per hour to trade with this coin
-            "account_equity_pct_per_trade": 0.0001, # percentage of total account equity size of entries
-            "entry_spread": 0.001,                  # spread to be added to min and max emas, see below
-            "profit_pct": 0.0025,                   # minimum exit markup
-            "borrow": true                          # whether to borrow coin or not. BNB is set to false by default because of high interest rate
+         "ADA/BTC": {
+            "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080],   # no bid will be higher than min(emas), no ask will be lower than max(emas)
+            "max_memory_span_days": 120,                                            # my_trades_age_limit = max(snapshot_timestamp_millis,
+            "snapshot_timestamp_millis": 0,                                         #                           now - max_memory_span_millis)
+            "min_profit_pct": 0.005,                                                # long exit prices are at least 0.5%, max ~10%, higher than
+            "max_profit_pct": 0.1,                                                  # long volume weighted average price, inverse with shorts
+            "profit_pct_multiplier": 0.5,                                           # long_exit_price = long_vwap * (1 + min(max_profit_pct,
+                                                                                    #                                        max(min_profit_pct, -bag_ratio)))
+                                                                                    # shrt_exit_price = shrt_vwap * (1 - min(max_profit_pct,
+                                                                                    #                                        max(min_profit_pct, bag_ratio)))
+                                                                                    # where bag_ratio = ((long_cost - shrt_cost) / equity) * profit_pct_multiplier
+            "entry_spread": 0.001,                                                  # max_bid_price = min(emas) * (1 - entry_spread / 2)
+                                                                                    # min_ask_price = max(emas) * (1 + entry_spread / 2)
+            "entry_vol_modifier_exponent": 12,                                      # entry volume is modified by the following formula:
+                                                                                    # max_long_entry_vol *= max(
+                                                                                    #     1.0,
+                                                                                    #     min(min_exit_cost_multiplier / 2,
+                                                                                    #        (long_exit_price / current_price)^entry_vol_modifier_exponent)
+                                                                                    # )
+                                                                                    # max_shrt_entry_vol *= max(
+                                                                                    #     1.0,
+                                                                                    #     min(min_exit_cost_multiplier / 2,
+                                                                                    #        (current_price / shrt_exit_price)^entry_vol_modifier_exponent)
+                                                                                    # )
+                                                                                    # bigger difference between exit_price and current price gives bigger entries
+                                                                                    # set entry_vol_modifier_exponent = 0 and there will be no
+                                                                                    # entry_vol modification
+            "min_exit_cost_multiplier": 10,                                         # exits are at least 10 times bigger than entries
+            "long": true,
+            "shrt": true,
+            "account_equity_pct_per_hour": 0.0208333,
+            "account_equity_pct_per_entry": 0.002
         },
-        "ATOM" {...},
-        ...
-    }
-    "bnb_buffer": 50.3,                             # BNB buffer for paying fees and interest, and for vip status
-    "max_memory_span_days": 120,                    # how many days past the bot will take trade history into account
-    "snapshot_timestamp_millis": 0,                 # timestamp in millis from which bot will take trade history into account
-    "ema_spans_minutes": [15, 25 ... 675, 1080],    # exponential moving averages used to set max bid and min ask prices
-                                                    # it calculates any number of emas,
-                                                    # and sets highest allowed bid = min(emas) and lowest allowed ask = max(emas)
-    "entry_vol_modifier_exponent": 12,              # entry volume is modified by the following formula:
-                                                    # max_long_entry_vol *= max(
-                                                          1.0, min(settings["min_exit_cost_multiplier"] / 2,
-                                                                   (long_exit_price / current_price)**entry_vol_modifier_exponent)
-                                                      )
-                                                    # max_shrt_entry_vol *= max(
-                                                          1.0, min(settings["min_exit_cost_multiplier"] / 2,
-                                                                   (current_price / shrt_exit_price)**entry_vol_modifier_exponent)
-                                                      )
-                                                    # bigger difference between exit_price and current price gives bigger entries
-                                                    # set entry_vol_modifier_exponent = 0 and there will be no entry_vol modification
-    "min_exit_cost_multiplier": 10,                 # the exits are at least 10 times larger than the entries
-                                                    # the entry size can be up to (10 / 2) times larger,
-                                                    # modified by distance between exit price and current price
-    "entry_spread": 0.002,                          # max_bid_price = min(emas) * (1 - entry_spread / 2)
-                                                    # min_ask_price = max(emas) * (1 + entry_spread / 2)
 
 
 
 
-
-
-
-
-
-by default it will long all coins and short all coins except BNB due to high interest rate
+by default it will long all coins and short all coins
 
 it will automatically place and delete orders, borrow and repay
 
 it will only make orders, never (except by accident) take orders
 
-it maintains up to 4 orders per market pair
+it maintains up to 5 orders per market pair
 
 
 one long entry: small bid
@@ -184,6 +163,8 @@ one long exit: big ask
 one short entry: small ask
 
 one short exit: big bid
+
+one liquidation ask in case there is leftover coin after making long exits
 
 it will automatically analyze past trades and make appropriate long and short exits
 
