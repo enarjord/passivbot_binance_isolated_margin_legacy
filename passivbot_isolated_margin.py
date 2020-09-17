@@ -60,6 +60,8 @@ class Bot:
         )
         self.settings = settings['symbols']
         self.symbols = set(self.settings)
+        self.active_symbols = [s for s in self.symbols
+                               if self.settings[s]['long'] or self.settings[s]['shrt']]
         self.balance = {}
         self.open_orders = {}
         self.my_bids = {}
@@ -113,8 +115,9 @@ class Bot:
                                       'create_ask': {s: now_m2 for s in self.symbols},
                                       'cancel_order': {s: now_m2 for s in self.symbols},
                                       'borrow': {sc: now_m2 for sc in scs},
-                                      'repay': {sc: now_m2 for sc in scs},
+                                      'repay': {sc: 0 for sc in scs},
                                       'dump_balance_log': {'dump_balance_log': 0},
+                                      'distribute_spot_btc': {'distribute_spot_btc': 0},
                                       'execute_to_exchange': {s: now_m2 for s in self.symbols}}}
         self.timestamps['released'] = {k0: {k1: self.timestamps['locked'][k0][k1] + 1
                                             for k1 in self.timestamps['locked'][k0]}
@@ -191,6 +194,14 @@ class Bot:
             'asset': coin,
             'symbol': symbol.replace('/', '')
         }})
+        if t is not None:
+            print_([f'transfered {amount} {coin} to {symbol} isolated wallet'])
+            self.balance[symbol][coin]['equity'] += amount
+            if self.s2c[symbol] == coin:
+                self.balance[symbol]['equity'] += amount / self.last_price[symbol]
+            else:
+                self.balance[symbol]['equity'] += amount
+
         return t
 
     async def transfer_from_isolated(self, symbol: str, coin: str, amount: float):
@@ -202,6 +213,13 @@ class Bot:
             'asset': coin,
             'symbol': symbol.replace('/', '')
         }})
+        if t is not None:
+            print_([f'transfered {amount} {coin} from {symbol} isolated wallet'])
+            self.balance[symbol][coin]['equity'] -= amount
+            if self.s2c[symbol] == coin:
+                self.balance[symbol]['equity'] -= amount / self.last_price[symbol]
+            else:
+                self.balance[symbol]['equity'] -= amount
         return t
 
     async def create_bid(self, symbol: str, amount: float, price: float) -> None:
@@ -209,7 +227,7 @@ class Bot:
             return
         coin, quot = self.symbol_split[symbol]
         side_effect = 'MARGIN_BUY' if self.balance[symbol][quot]['free'] < amount * price \
-            else 'AUTO_REPAY'
+            else 'NO_SIDE_EFFECT'
         bid = await tw(self.cc.sapi_post_margin_order, kwargs={'params': {
             'symbol': symbol.replace('/', ''),
             'isIsolated': 'TRUE',
@@ -254,7 +272,8 @@ class Bot:
         if self.is_executing('create_ask', symbol):
             return
         coin, quot = self.symbol_split[symbol]
-        side_effect = 'MARGIN_BUY' if self.balance[symbol][coin]['free'] < amount else 'AUTO_REPAY'
+        side_effect = 'MARGIN_BUY' if self.balance[symbol][coin]['free'] < amount else \
+            'NO_SIDE_EFFECT'
         ask = await tw(self.cc.sapi_post_margin_order, kwargs={'params': {
             'symbol': symbol.replace('/', ''),
             'isIsolated': 'TRUE',
@@ -364,8 +383,24 @@ class Bot:
             'symbol': symbol.replace('/', ''),
             'amount': amount
         }})
+        self.balance[symbol][coin]['debt'] -= amount
+        self.balance[symbol][coin]['onhand'] -= amount
+        self.balance[symbol][coin]['free'] -= amount
+        if coin == self.s2c[symbol]:
+            cost = amount * self.last_price[symbol]
+            self.balance[symbol]['debt'] -= cost
+            self.balance[symbol]['total_account_debt'] -= cost
+            self.balance[symbol]['total_account_onhand'] -= cost
+        else:
+            self.balance[symbol]['debt'] -= amount
+            self.balance[symbol]['total_account_debt'] -= amount
+            self.balance[symbol]['total_account_onhand'] -= amount
         self.timestamps['released']['repay'][sc] = time()
-        return {**{'symbol': symbol, 'coin': coin, 'amount': amount}, **repaid}
+        result = {**{'symbol': symbol, 'coin': coin, 'amount': amount}, **repaid}
+        if result is not None:
+            print_(['   repaid',
+                    [result[k] for k in ['symbol', 'coin', 'amount']]])
+        return result
 
     async def update_borrowable(self, symbol: str, coin: str):
         sc = symbol + coin
@@ -433,7 +468,7 @@ class Bot:
             total_account_onhand = float(fetched['totalAssetOfBtc'])
         else:
             fetched = await tw(self.cc.sapi_get_margin_isolated_account,
-                            kwargs={'params': {'symbols': self.dash_to_nodash[symbol]}})
+                               kwargs={'params': {'symbols': self.dash_to_nodash[symbol]}})
             total_account_equity = None
             total_account_debt = None
             total_account_onhand = None
@@ -456,6 +491,12 @@ class Bot:
                 } for k0, k1 in zip([quot, coin], ['quoteAsset', 'baseAsset'])
             }
             balance['equity'] = sum([balance[k]['equity_ito_btc'] for k in [coin, quot]])
+            balance[coin]['transferable'] = \
+                max(0.0, min(balance[coin]['onhand'] - balance[coin]['debt'],
+                             balance[coin]['free']))
+            balance[quot]['transferable'] = \
+                max(0.0, min(balance[quot]['onhand'] - balance[quot]['debt'],
+                             balance[quot]['free']))
             if total_account_equity:
                 balance['total_account_equity'] = total_account_equity
                 balance['total_account_debt'] = total_account_debt
@@ -471,6 +512,8 @@ class Bot:
             try:
                 balance['debt'] = (self.convert_amount(balance[coin]['debt'], coin, quot) +
                                    balance[quot]['debt'])
+                balance['onhand'] = self.convert_amount(balance[coin]['onhand'], coin, quot) + \
+                    balance[quot]['onhand']
                 balance['entry_cost'] = max([
                     (self.settings[s]['account_equity_pct_per_entry'] *
                      balance['total_account_equity']),
@@ -709,7 +752,7 @@ class Bot:
         for k in [c, q]:
             if self.is_executing('update_borrowable', s + k, do_lock=False):
                 return
-        eligible_orders = self.get_ideal_orders(s)
+        eligible_orders, repays = self.get_ideal_orders(s)
         orders_to_delete, orders_to_create = filter_orders(self.open_orders[s], eligible_orders)
         '''
         if orders_to_delete:
@@ -734,6 +777,16 @@ class Bot:
                     if 'liquidate' in o:
                         print_([f'{s} out of balance, too much {self.s2c[s]}, creating extra ask'])
                     asyncio.create_task(tw(self.create_ask, args=(s, o['amount'], o['price'])))
+        elif repays:
+            r = np.random.choice(repays)
+            sc = r['symbol'] + r['coin']
+            locked = self.timestamps['locked']['repay']
+            if now - self.timestamps['released']['repay'][sc] > 59 * 60 and \
+                    now - max(locked[key] for key in locked) > 5:
+                print('DEBUG', s, r['coin'])
+                print(self.balance[r['symbol']][r['coin']])
+                asyncio.create_task(tw(self.repay, args=(r['symbol'], r['coin'], r['amount'])))
+
         '''
         for o in orders_to_delete[:2]:
             asyncio.create_task(tw(self.cancel_order,
@@ -1164,8 +1217,29 @@ class Bot:
                     'price': liqui_price,
                     'liquidate': True,
                 })
-        return eligible_orders
 
+        # coin repay
+        repays = []
+        coin_repay_amount = max(0.0,
+                                min([self.balance[s][c]['free'],
+                                     self.balance[s][c]['debt'],
+                                     (self.balance[s][c]['onhand'] -
+                                      sum(e['amount']
+                                          for e in eligible_orders
+                                          if e['side'] == 'sell'))]))
+        if coin_repay_amount > self.min_trade_costs[s] / self.last_price[s]:
+            repays.append({'symbol': s, 'coin': c, 'amount': coin_repay_amount})
+        quot_repay_amount = max(0.0,
+                                min([self.balance[s][q]['free'],
+                                     self.balance[s][q]['debt'],
+                                     (self.balance[s][q]['onhand'] -
+                                      sum(e['amount'] * e['price']
+                                          for e in eligible_orders
+                                          if e['side'] == 'buy'))]))
+        if quot_repay_amount > self.min_trade_costs[s]:
+            repays.append({'symbol': s, 'coin': q, 'amount': quot_repay_amount})
+
+        return eligible_orders, repays
 
     async def dump_balance_log(self):
         interval = 60 * 60
@@ -1178,6 +1252,9 @@ class Bot:
             f'logs/binance/{self.user}/isolated_margin_balances/balances.txt'
         )
         balance = await self.get_balance()
+        for s in list(balance):
+            if s in self.cc.markets and not balance[s]['equity']:
+                del balance[s]
         with open(filepath, 'a') as f:
             line = json.dumps({**{'timestamp': self.cc.milliseconds()}, **balance}) + '\n'
             f.write(line)
@@ -1219,12 +1296,9 @@ def analyze_my_trades(my_trades: [dict],
 
     buy_cost, buy_amount = 0.0, 0.0
     sel_cost, sel_amount = 0.0, 0.0
-    sum_cost, sum_amount = 0.0, 0.0
 
     for mt in my_trades:
         if mt['side'] == 'buy':
-            sum_cost += mt['cost']
-            sum_amount += mt['amount']
             buy_cost += mt['cost']
             buy_amount += mt['amount']
             if mt['amount'] < entry_exit_amount_threshold:
@@ -1242,8 +1316,6 @@ def analyze_my_trades(my_trades: [dict],
                     shrt_amount = 0.0
                     shrt_cost = 0.0
         else:
-            sum_cost -= mt['cost']
-            sum_amount -= mt['amount']
             sel_cost += mt['cost']
             sel_amount += mt['amount']
             if mt['amount'] < entry_exit_amount_threshold:
@@ -1269,7 +1341,6 @@ def analyze_my_trades(my_trades: [dict],
                 'shrt_vwap': shrt_cost / shrt_amount if shrt_amount else 0.0,
                 'buy_vwap': buy_cost / buy_amount if buy_amount else 0.0,
                 'sel_vwap': sel_cost / sel_amount if sel_amount else 0.0,
-                'sum_vwap': sum_cost / sum_amount if sum_amount else 0.0,
                 'long_start_ts': long_start_ts,
                 'shrt_start_ts': shrt_start_ts,
                 'last_long_entry_ts': last_long_entry_ts,
