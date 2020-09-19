@@ -1245,10 +1245,10 @@ class Bot:
     async def distribute_btc(self):
         now = time()
         '''
-        if now - self.timestamps['locked']['distribute_spot_btc']['distribute_spot_btc'] < 60 * 5:
+        if now - self.timestamps['locked']['distribute_btc']['distribute_btc'] < 60 * 5:
             return
         '''
-        self.timestamps['locked']['distribute_spot_btc']['distribute_spot_btc'] = now
+        self.timestamps['locked']['distribute_btc']['distribute_btc'] = now
         print_(['distributing btc'])
         debts = {s: self.balance[s]['debt'] for s in sorted(self.active_symbols)}
         sum_debt = sum(debts.values())
