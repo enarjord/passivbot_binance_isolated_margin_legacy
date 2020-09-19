@@ -60,7 +60,7 @@ class Bot:
         )
         self.settings = settings['symbols']
         self.symbols = set(self.settings)
-        self.active_symbols = [s for s in self.symbols
+        self.active_symbols = [s for s in sorted(self.symbols)
                                if self.settings[s]['long'] or self.settings[s]['shrt']]
         self.balance = {}
         self.open_orders = {}
@@ -117,7 +117,7 @@ class Bot:
                                       'borrow': {sc: now_m2 for sc in scs},
                                       'repay': {sc: 0 for sc in scs},
                                       'dump_balance_log': {'dump_balance_log': 0},
-                                      'distribute_spot_btc': {'distribute_spot_btc': 0},
+                                      'distribute_btc': {'distribute_btc': 0},
                                       'execute_to_exchange': {s: now_m2 for s in self.symbols}}}
         self.timestamps['released'] = {k0: {k1: self.timestamps['locked'][k0][k1] + 1
                                             for k1 in self.timestamps['locked'][k0]}
@@ -642,6 +642,7 @@ class Bot:
                 seen.add(mt['id'])
         else:
             mts = await tw(self.fetch_my_trades, args=(symbol,))
+        mts = conglomerate_my_trades(mts)
         age_limit_millis = max(
             self.cc.milliseconds() - self.settings[symbol]['max_memory_span_millis'],
             self.settings[symbol]['snapshot_timestamp_millis']
@@ -1241,6 +1242,39 @@ class Bot:
 
         return eligible_orders, repays
 
+    async def distribute_btc(self):
+        now = time()
+        '''
+        if now - self.timestamps['locked']['distribute_spot_btc']['distribute_spot_btc'] < 60 * 5:
+            return
+        '''
+        self.timestamps['locked']['distribute_spot_btc']['distribute_spot_btc'] = now
+        print_(['distributing btc'])
+        debts = {s: self.balance[s]['debt'] for s in sorted(self.active_symbols)}
+        sum_debt = sum(debts.values())
+        btc_acc_val = self.balance[next(iter(self.symbols))]['total_account_equity']
+        btc = btc_acc_val / 2
+        ideal_btc = {s: btc / len(self.active_symbols) + btc * (debts[s] / sum_debt) for s in debts}
+        adjustments = {s: ideal_btc[s] - self.balance[s]['equity'] for s in debts}
+        for s in adjustments:
+            if adjustments[s] < 0.0:
+                amount = min(self.balance[s]['BTC']['transferable'], -adjustments[s])
+                if amount > 0.0:
+                    await tw(self.transfer_from_isolated, args=(s, 'BTC', amount))
+                    await asyncio.sleep(1)
+
+        spot_bal = await self.cc.fetch_balance()
+        spot_btc_free = spot_bal['BTC']['free']
+        for s in adjustments:
+            if adjustments[s] > 0.0 and spot_btc_free > 0.0:
+                amount = min(adjustments[s], spot_btc_free)
+                if amount > 0.0:
+                    await tw(self.transfer_to_isolated, args=(s, 'BTC', amount))
+                    await asyncio.sleep(1)
+                    spot_btc_free -= amount
+        await self.update_balance()
+        return
+
     async def dump_balance_log(self):
         interval = 60 * 60
         if self.is_executing('dump_balance_log', 'dump_balance_log'):
@@ -1333,6 +1367,7 @@ def analyze_my_trades(my_trades: [dict],
                     long_amount = 0.0
                     long_cost = 0.0
 
+
     analysis = {'long_amount': long_amount,
                 'long_cost': long_cost,
                 'long_vwap': long_cost / long_amount if long_amount else 0.0,
@@ -1347,11 +1382,36 @@ def analyze_my_trades(my_trades: [dict],
                 'last_shrt_entry_ts': last_shrt_entry_ts,
                 'last_long_entry_cost': last_long_entry_cost,
                 'last_shrt_entry_cost': last_shrt_entry_cost,
-                'entry_exit_amount_threshold': entry_exit_amount_threshold}
+                'entry_exit_amount_threshold': entry_exit_amount_threshold,
+                'entry_cost': entry_cost}
 
     start_ts = min(long_start_ts, shrt_start_ts) - 1000 * 60 * 60 * 24 * 30
     _, cropped_my_trades = partition_sorted(my_trades, lambda x: x['timestamp'] >= start_ts)
     return cropped_my_trades, analysis
+
+def conglomerate_my_trades(mt: [dict]):
+    ts_price_dict = defaultdict(list)
+    for t in mt:
+        ts_price_dict[(t['timestamp'], t['price'])].append(t)
+    conglomerated = []
+    for k in ts_price_dict:
+        if len(ts_price_dict[k]) == 1:
+            conglomerated.append(ts_price_dict[k][0])
+        else:
+            xs = ts_price_dict[k]
+            conglomerated.append({'symbol': xs[0]['symbol'],
+                                  'id': max(x['id'] for x in xs),
+                                  'order_id': max(x['order_id'] for x in xs),
+                                  'side': xs[0]['side'],
+                                  'amount': sum(x['amount'] for x in xs),
+                                  'price': xs[0]['price'],
+                                  'cost': sum(x['cost'] for x in xs),
+                                  'fee': sum(x['fee'] for x in xs),
+                                  'fee_coin': xs[0]['fee_coin'],
+                                  'timestamp': xs[0]['timestamp'],
+                                  'datetime': xs[0]['datetime'],
+                                  'is_maker': xs[0]['is_maker']})
+    return sorted(conglomerated, key=lambda x: x['timestamp'])
 
 
 def filter_orders(actual_orders: [dict],
