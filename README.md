@@ -79,7 +79,7 @@ the big short bid is adjusted after each new short sell
 
 by default it will make exits at at least 0.5% markup to cover fees to exchange and profit
 
-net profit per exit will depend on whether fees are paid with BNB and on vip level
+net profit per exit will depend on vip level
 
 
 interest paid on loans from exchange will also reduce profits
@@ -107,23 +107,25 @@ red dots are small short sells, blue dots are big short buys, blue line is short
 ------------------------------------------------------------------
 the size of its bids and asks scale with account equity
 
+the market pairs in default settings are arbitrarily chosen, trading them is neither recommended nor discouraged
+
 
 about the settings:
 
-         "ADA/BTC": {
+         "ETH/BTC": {
             "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080],   # no bid will be higher than min(emas), no ask will be lower than max(emas)
-            "max_memory_span_days": 120,                                            # my_trades_age_limit = max(snapshot_timestamp_millis,
+            "max_memory_span_days": 60,                                             # my_trades_age_limit = max(snapshot_timestamp_millis,
             "snapshot_timestamp_millis": 0,                                         #                           now - max_memory_span_millis)
-            "min_profit_pct": 0.005,                                                # long exit prices are at least 0.5%, max ~10%, higher than
-            "max_profit_pct": 0.1,                                                  # long volume weighted average price, inverse with shorts
-            "profit_pct_multiplier": 0.5,                                           # long_exit_price = long_vwap * (1 + min(max_profit_pct,
-                                                                                    #                                        max(min_profit_pct, -bag_ratio)))
-                                                                                    # shrt_exit_price = shrt_vwap * (1 - min(max_profit_pct,
-                                                                                    #                                        max(min_profit_pct, bag_ratio)))
+            "min_markup_pct": 0.0025,                                               # long exit prices are at least 0.5%, max ~10%, higher than
+            "max_markup_pct": 0.05,                                                 # long volume weighted average price, inverse with shorts
+            "markup_pct_multiplier": 0.5,                                           # long_exit_price = long_vwap * (1 + min(max_markup_pct,
+                                                                                    #                                        max(min_markup_pct, -bag_ratio)))
+                                                                                    # shrt_exit_price = shrt_vwap * (1 - min(max_markup_pct,
+                                                                                    #                                        max(min_markup_pct, bag_ratio)))
                                                                                     # where bag_ratio = ((long_cost - shrt_cost) / equity) * profit_pct_multiplier
             "entry_spread": 0.001,                                                  # max_bid_price = min(emas) * (1 - entry_spread / 2)
                                                                                     # min_ask_price = max(emas) * (1 + entry_spread / 2)
-            "entry_vol_modifier_exponent": 12,                                      # entry volume is modified by the following formula:
+            "entry_vol_modifier_exponent": 20,                                      # entry volume is modified by the following formula:
                                                                                     # max_long_entry_vol *= max(
                                                                                     #     1.0,
                                                                                     #     min(min_exit_cost_multiplier / 2,
@@ -137,17 +139,15 @@ about the settings:
                                                                                     # bigger difference between exit_price and current price gives bigger entries
                                                                                     # set entry_vol_modifier_exponent = 0 and there will be no
                                                                                     # entry_vol modification
-            "min_exit_cost_multiplier": 10,                                         # exits are at least 10 times bigger than entries
+            "min_exit_cost_multiplier": 20,                                         # exits are at least 10 times bigger than entries
             "long": true,
             "shrt": true,
-            "account_equity_pct_per_hour": 0.0208333,
-            "account_equity_pct_per_entry": 0.002
+            "account_equity_pct_per_hour": 0.001,
+            "account_equity_pct_per_entry": 0.0001
         },
 
 
 
-
-by default it will long all coins and short all coins
 
 it will automatically place and delete orders, borrow and repay
 
@@ -164,7 +164,7 @@ one short entry: small ask
 
 one short exit: big bid
 
-one liquidation ask in case there is leftover coin after making long exits
+one liquidation order in case of mismatch between balance and analysis of past trades
 
 it will automatically analyze past trades and make appropriate long and short exits
 
