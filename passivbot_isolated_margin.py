@@ -556,6 +556,13 @@ class Bot:
         }})
         return {'symbol': symbol, 'coin': coin, 'amount': float(borrowable['amount'])}
 
+    async def get_transferable(self, symbol: str, coin: str):
+        borrowable = await tw(self.cc.sapi_get_margin_maxtransferable, kwargs={'params': {
+            'asset': coin,
+            'isolatedSymbol': symbol.replace('/', '')
+        }})
+        return {'symbol': symbol, 'coin': coin, 'amount': float(borrowable['amount'])}
+
     async def update_open_orders(self, symbol):
         if self.is_executing('update_open_orders', symbol):
             return
@@ -1242,7 +1249,7 @@ class Bot:
 
         return eligible_orders, repays
 
-    async def distribute_btc(self):
+    async def distribute_btc(self, execute: bool = True):
         now = time()
         '''
         if now - self.timestamps['locked']['distribute_btc']['distribute_btc'] < 60 * 5:
@@ -1250,30 +1257,38 @@ class Bot:
         '''
         self.timestamps['locked']['distribute_btc']['distribute_btc'] = now
         print_(['distributing btc'])
-        debts = {s: self.balance[s]['debt'] for s in sorted(self.active_symbols)}
-        sum_debt = sum(debts.values())
-        btc_acc_val = self.balance[next(iter(self.symbols))]['total_account_equity']
-        btc = btc_acc_val / 2
-        ideal_btc = {s: btc / len(self.active_symbols) + btc * (debts[s] / sum_debt) for s in debts}
-        adjustments = {s: ideal_btc[s] - self.balance[s]['equity'] for s in debts}
-        for s in adjustments:
-            if adjustments[s] < 0.0:
-                amount = min(self.balance[s]['BTC']['transferable'], -adjustments[s])
-                if amount > 0.0:
+        transferables = await asyncio.gather(*[self.get_transferable(s, 'BTC')
+                                               for s in sorted(self.active_symbols)])
+        transferables = {e['symbol']: e['amount'] for e in transferables}
+        sum_transferables = sum(transferables.values())
+        borrowables = {s: self.balance[s]['BTC']['borrowable'] for s in sorted(self.active_symbols)}
+        sum_borrowables = sum(borrowables.values())
+        ratios = {s: sum_borrowables - borrowables[s] for s in borrowables}
+        min_ = min(ratios.values())
+        max_ = max(ratios.values())
+        ratios = {s: (ratios[s] - min_) / (max_ - min_) for s in ratios}
+        ratios = {s: ratios[s] / sum(ratios.values()) for s in ratios}
+        distribution = {s: sum_transferables * ratios[s] for s in ratios}
+        for s in distribution:
+            amount = transferables[s]
+            if amount > 0.0:
+                if execute:
                     await tw(self.transfer_from_isolated, args=(s, 'BTC', amount))
                     await asyncio.sleep(1)
-
+                else:
+                    print(f'transfer {amount} BTC from {s}')
         spot_bal = await self.cc.fetch_balance()
         spot_btc_free = spot_bal['BTC']['free']
-        for s in adjustments:
-            if adjustments[s] > 0.0 and spot_btc_free > 0.0:
-                amount = min(adjustments[s], spot_btc_free)
-                if amount > 0.0:
+        for s in sorted(distribution, key=lambda x: distribution[x], reverse=True):
+            amount = min(spot_btc_free, distribution[s])
+            if amount > 0.0:
+                if execute:
                     await tw(self.transfer_to_isolated, args=(s, 'BTC', amount))
                     await asyncio.sleep(1)
-                    spot_btc_free -= amount
+                else:
+                    print(f'transfer {amount} BTC to {s}')
+                spot_btc_free -= amount
         await self.update_balance()
-        return
 
     async def dump_balance_log(self):
         interval = 60 * 60
