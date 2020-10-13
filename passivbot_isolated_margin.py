@@ -101,6 +101,7 @@ class Bot:
         self.min_trade_costs = {s: self.cc.markets[s]['limits']['cost']['min']
                                 for s in self.symbols}
         self.s2c = {s: self.symbol_split[s][0] for s in self.symbol_split}
+        self.s2q = {s: self.symbol_split[s][1] for s in self.symbol_split}
         self.quot = self.symbol_split[next(iter(self.symbols))][1]
         assert all(self.symbol_split[s][1] == self.quot for s in self.symbols)
 
@@ -235,6 +236,7 @@ class Bot:
             'type': 'LIMIT',
             'quantity': amount,
             'price': price,
+            'timeInForce': 'GTC',
             'sideEffectType': side_effect
         }})
         if type(bid) != dict:
@@ -281,6 +283,7 @@ class Bot:
             'type': 'LIMIT',
             'quantity': amount,
             'price': price,
+            'timeInForce': 'GTC',
             'sideEffectType': side_effect
         }})
         if type(ask) != dict:
@@ -402,7 +405,11 @@ class Bot:
                     [result[k] for k in ['symbol', 'coin', 'amount']]])
         return result
 
-    async def update_borrowable(self, symbol: str, coin: str):
+    async def update_borrowable(self, symbol: str, coin: str = None):
+        if coin is None:
+            await self.update_borrowable(symbol, self.s2c[symbol])
+            await self.update_borrowable(symbol, self.s2q[symbol])
+            return
         sc = symbol + coin
         _, quot = self.symbol_split[symbol]
         if self.is_executing('update_borrowable', sc):
@@ -1288,6 +1295,14 @@ class Bot:
                 else:
                     print(f'transfer {amount} BTC to {s}')
                 spot_btc_free -= amount
+        if spot_btc_free > 0.0:
+            s = sorted(distribution, key=lambda x: distribution[x], reverse=True)[0]
+            amount = spot_btc_free
+            if execute:
+                await tw(self.transfer_to_isolated, args=(s, 'BTC', amount))
+                await asyncio.sleep(1)
+            else:
+                print(f'transfer {amount} BTC to {s}')
         await self.update_balance()
 
     async def dump_balance_log(self):
