@@ -116,7 +116,7 @@ about the settings:
             "max_memory_span_days": 60,                                             # my_trades_age_limit = max(snapshot_timestamp_millis,
             "snapshot_timestamp_millis": 0,                                         #                           now - max_memory_span_millis)
             "min_markup_pct": 0.0025,                                               # long exit prices are at least 0.25%, max ~10%, higher than
-            "max_markup_pct": 0.05,                                                 # long volume weighted average price, inverse with shorts
+            "max_markup_pct": 0.1,                                                 # long volume weighted average price, inverse with shorts
             "entry_spread": 0.001,                                                  # max_bid_price = min(emas) * (1 - entry_spread / 2)
                                                                                     # min_ask_price = max(emas) * (1 + entry_spread / 2)
             "entry_vol_modifier_exponent": 20,                                      # entry volume is modified by the following formula:
@@ -137,7 +137,12 @@ about the settings:
             "long": true,
             "shrt": true,
             "account_equity_pct_per_hour": 0.001,                                   # account_equity is sum of equity of all isolated margin trading pairs
-            "account_equity_pct_per_entry": 0.0001
+            "account_equity_pct_per_entry": 0.0001,
+            "n_days_to_min_markup": 12                                              # markup is modified thusly
+                                                                                    # markup = max(min_markup_pct,
+                                                                                    #              max_markup_pct * ((n_days_to_min_markup -
+                                                                                                                      n_days_since_prev_exit) /
+                                                                                                                     n_days_to_min_markup))
         },
 
 
