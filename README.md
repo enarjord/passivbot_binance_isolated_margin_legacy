@@ -1,6 +1,8 @@
 # passivbot
 trading bot running on binance isolated margin
 
+use at own risk
+
 
 requires python >= 3.8
 
@@ -11,13 +13,11 @@ dependencies, install with pip:
 `python3.8 -m pip install matplotlib pandas websockets ccxt`
 
 
-binance account needs margin enabled,
-
-use at own risk
-
 ------------------------------------------------------------------
 
 usage:
+
+binance account needs isolated margin enabled for each symbol to trade
 
 add api key and secret as json file in dir
 
@@ -60,24 +60,23 @@ it longs by making small bids and shorts by borrowing coin from binance and maki
 
 it listens to websocket stream and updates its orders continuously
 
-it will look back in its own trade history and conglomerate all small buys into one big sell, and all small sells into one big buy
+it will look back in its own trade history to determine exit price and amount
 
-it exits longs by summing up all btc spent and all coin acquired on small long buys since previous full long exit,
-placing a big long ask whose price is sum(btc_spent) / sum(coin_acquired) * (1 + 0.005),
+it exits longs by summing up all btc spent on and all coin acquired from long entries since previous full long exit,
+placing a big long ask whose price is sum(btc_spent) / sum(coin_acquired) * (1 + markup), # default markup = 0.0025
+and amount is sum(coin_acquired)
 
-the big long ask is adjusted after each new long buy
+the long exit ask is adjusted after each new long entry
 
-if it runs out of btc, it will borrow btc, and repay btc debt after long positions are filled
+if it runs out of btc for long entries, it will borrow btc, repaying after long position is filled
 
 inversely,
-it exits shorts by summing up all btc acquired and all coin spent on small short sells since previous full short exit,
-placing a big short bid whose price is sum(btc_acquired) / sum(coin_spent) * (1 - 0.005)
+it exits shorts by summing up all btc acquired from and all coin spent on short entries since previous full short exit,
+placing a big short bid whose price is sum(btc_acquired) / sum(coin_spent) * (1 - markup)
 
 when the short exit position is filled, it repays the coin debt
 
-the big short bid is adjusted after each new short sell
-
-by default it will make exits at at least 0.5% markup to cover fees to exchange and profit
+the short exit bid is adjusted after each new short sell
 
 net profit per exit will depend on vip level
 
@@ -116,13 +115,8 @@ about the settings:
             "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080],   # no bid will be higher than min(emas), no ask will be lower than max(emas)
             "max_memory_span_days": 60,                                             # my_trades_age_limit = max(snapshot_timestamp_millis,
             "snapshot_timestamp_millis": 0,                                         #                           now - max_memory_span_millis)
-            "min_markup_pct": 0.0025,                                               # long exit prices are at least 0.5%, max ~10%, higher than
+            "min_markup_pct": 0.0025,                                               # long exit prices are at least 0.25%, max ~10%, higher than
             "max_markup_pct": 0.05,                                                 # long volume weighted average price, inverse with shorts
-            "markup_pct_multiplier": 0.5,                                           # long_exit_price = long_vwap * (1 + min(max_markup_pct,
-                                                                                    #                                        max(min_markup_pct, -bag_ratio)))
-                                                                                    # shrt_exit_price = shrt_vwap * (1 - min(max_markup_pct,
-                                                                                    #                                        max(min_markup_pct, bag_ratio)))
-                                                                                    # where bag_ratio = ((long_cost - shrt_cost) / equity) * profit_pct_multiplier
             "entry_spread": 0.001,                                                  # max_bid_price = min(emas) * (1 - entry_spread / 2)
                                                                                     # min_ask_price = max(emas) * (1 + entry_spread / 2)
             "entry_vol_modifier_exponent": 20,                                      # entry volume is modified by the following formula:
@@ -136,13 +130,13 @@ about the settings:
                                                                                     #     min(min_exit_cost_multiplier / 2,
                                                                                     #        (current_price / shrt_exit_price)^entry_vol_modifier_exponent)
                                                                                     # )
-                                                                                    # bigger difference between exit_price and current price gives bigger entries
+                                                                                    # greater difference between exit_price and current price gives bigger entries
                                                                                     # set entry_vol_modifier_exponent = 0 and there will be no
                                                                                     # entry_vol modification
             "min_exit_cost_multiplier": 20,                                         # exits are at least 10 times bigger than entries
             "long": true,
             "shrt": true,
-            "account_equity_pct_per_hour": 0.001,
+            "account_equity_pct_per_hour": 0.001,                                   # account_equity is sum of equity of all isolated margin trading pairs
             "account_equity_pct_per_entry": 0.0001
         },
 
@@ -165,8 +159,6 @@ one short entry: small ask
 one short exit: big bid
 
 one liquidation order in case of mismatch between balance and analysis of past trades
-
-it will automatically analyze past trades and make appropriate long and short exits
 
 -------------------------------------------------------------------------
 
