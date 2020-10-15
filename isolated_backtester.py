@@ -47,7 +47,7 @@ def backtest(df, settings: dict):
     long_cost, long_amount = 0.0, 0.0
     shrt_cost, shrt_amount = 0.0, 0.0
     sum_cost, sum_amount = 0.0, 0.0
-    long_vwap = shrt_vwap = sum_vwap = df.iloc[0].avg
+    long_vwap = shrt_vwap = df.iloc[0].avg
 
     prev_long_entry_ts, prev_shrt_entry_ts = 0, 0
     prev_long_exit_ts = prev_shrt_exit_ts = df.index[0]
@@ -104,9 +104,6 @@ def backtest(df, settings: dict):
                            'cost': shrt_entry_cost,
                            'fee': entry_cost * fee, 'quot_fee': True, 'type': 'entry',
                            'timestamp': row.Index})
-
-        sum_vwap = max(min(sum_cost / sum_amount if sum_amount > 0.0 else row.avg, row.avg * 1.3),
-                       row.avg * 0.7)
 
         long_vwap = max(min(long_cost / long_amount if long_amount else row.avg, row.avg * 1.3),
                         row.avg * 0.7)
@@ -168,8 +165,7 @@ def backtest(df, settings: dict):
         logs.append({'equity': equity, 'quot': balance[0], 'coin': balance[1],
                      'coin_ito_quot': coin_ito_quot,
                      'margin_level': margin_level, 'debt': debt, 'credit_avbl': credit_avbl,
-                     'long_vwap': long_exit_price, 'shrt_vwap': shrt_exit_price,
-                     'sum_vwap': sum_vwap,
+                     'long_exit_price': long_exit_price, 'shrt_exit_price': shrt_exit_price,
                      'timestamp': row.Index})
         k += 1
         if k % 5000 == 0:
