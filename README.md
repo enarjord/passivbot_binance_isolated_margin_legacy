@@ -48,6 +48,7 @@ run in terminal:
 `python3.8 passivbot_isolated_margin.py your_user_name`
 
 
+open with jupyter notebook isolated_margin_backtesting_notes.ipynb for backtesting
 
 ------------------------------------------------------------------
 overview
