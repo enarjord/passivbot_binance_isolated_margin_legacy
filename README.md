@@ -116,8 +116,8 @@ about the settings:
             "ema_spans_minutes": [15, 25, 40, 64, 102, 164, 263, 421, 675, 1080],   # no bid will be higher than min(emas), no ask will be lower than max(emas)
             "max_memory_span_days": 60,                                             # my_trades_age_limit = max(snapshot_timestamp_millis,
             "snapshot_timestamp_millis": 0,                                         #                           now - max_memory_span_millis)
-            "min_markup_pct": 0.0025,                                               # long exit prices are at least 0.25%, max ~10%, higher than
-            "max_markup_pct": 0.1,                                                  # long volume weighted average price, inverse with shorts
+            "min_markup_pct": 0.0025,                                               # after an exit, markup starts at max_markup_pct, declining to min_markup_pct
+            "max_markup_pct": 0.1,                                                  # over n_days_to_min_markup days
             "entry_spread": 0.001,                                                  # max_bid_price = min(emas) * (1 - entry_spread / 2)
                                                                                     # min_ask_price = max(emas) * (1 + entry_spread / 2)
             "entry_vol_modifier_exponent": 20,                                      # entry volume is modified by the following formula:
