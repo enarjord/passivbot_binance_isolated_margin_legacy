@@ -58,7 +58,7 @@ def backtest(df, settings: dict):
     margin = settings['max_leverage'] - 1
     min_exit_cost_multiplier = settings['min_exit_cost_multiplier']
     entry_vol_modifier_exponent = settings['entry_vol_modifier_exponent']
-    n_days_dim = settings['n_days_to_min_markup']
+    n_days_dim = max(9e-9, settings['n_days_to_min_markup'])
 
     fee = 0.001
     fee_m = 1 - fee
@@ -73,8 +73,9 @@ def backtest(df, settings: dict):
         delay_hours = entry_cost / settings['account_equity_pct_per_hour'] * equity
         if max(0.0, balance[0]) + credit_avbl > entry_cost and row.low < row.entry_bid and \
                 row.Index - prev_long_entry_ts >= delay_hours * HOUR_TO_MILLIS:
-            long_entry_cost = entry_cost * min(min_exit_cost_multiplier / 2,
-                                               (long_vwap / row.avg) ** entry_vol_modifier_exponent)
+            long_entry_cost = entry_cost * \
+                max(1.0, min(min_exit_cost_multiplier / 2,
+                             (long_vwap / row.avg) ** entry_vol_modifier_exponent))
             balance[0] -= long_entry_cost
             long_entry_amount = long_entry_cost / row.entry_bid
             balance[1] += long_entry_amount * fee_m
@@ -90,8 +91,9 @@ def backtest(df, settings: dict):
         if max(0.0, coin_ito_quot) + credit_avbl > entry_cost and \
                 row.high > row.entry_ask and \
                 row.Index - prev_shrt_entry_ts >= delay_hours * HOUR_TO_MILLIS:
-            shrt_entry_cost = entry_cost * min(min_exit_cost_multiplier / 2,
-                                    (row.avg / shrt_vwap) ** entry_vol_modifier_exponent)
+            shrt_entry_cost = entry_cost * \
+                max(1.0, min(min_exit_cost_multiplier / 2,
+                             (row.avg / shrt_vwap) ** entry_vol_modifier_exponent))
             shrt_entry_amount = shrt_entry_cost / row.entry_ask
             balance[1] -= shrt_entry_amount
             balance[0] += shrt_entry_cost * fee_m
@@ -114,7 +116,7 @@ def backtest(df, settings: dict):
         )
         long_exit_price = max(row.exit_ask, round_up(long_vwap_multiplier * long_vwap, precision))
         if long_amount and row.high > long_exit_price:
-            coin_ito_quot_avbl = max(0.0, balance[1] / row.avg) + credit_avbl
+            coin_ito_quot_avbl = max(0.0, balance[1] * row.avg) + credit_avbl
             long_exit_cost = min(coin_ito_quot_avbl, long_amount * long_exit_price)
             long_exit_amount = long_exit_cost / long_exit_price
             if long_exit_cost > entry_cost * min_exit_cost_multiplier:
