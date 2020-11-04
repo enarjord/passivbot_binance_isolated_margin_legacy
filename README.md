@@ -55,7 +55,13 @@ overview
 
 the bot's purpose is to accumulate btc
 
-it simultaneously longs and shorts any btc quoted market
+it can be used actively according to user's judgement of market conditions, but is designed and intended to work passively, i.e. "set and forget"
+
+a reasonably accurate backtester is included
+
+it simultaneously longs and shorts (optionally long only or short only) any btc quoted market
+
+it favors neither direction, but allocates equal volume to shorts and longs
 
 it longs by making small bids and shorts by borrowing coin from binance and making small asks
 
@@ -63,26 +69,18 @@ it listens to websocket stream and updates its orders continuously
 
 it will look back in its own trade history to determine exit price and amount
 
-it exits longs by summing up all btc spent on and all coin acquired from long entries since previous full long exit,
-placing a big long ask whose price is sum(btc_spent) / sum(coin_acquired) * (1 + markup), # default markup = 0.0025
-and amount is sum(coin_acquired)
+it exits positions in both directions at volume weighted average entry price with a given markup
 
-the long exit ask is adjusted after each new long entry
+e.g.
+long_exit_price = sum(long_entry_costs) / sum(long_entry_amounts) * (1 + markup)
+shrt_exit_price = sum(shrt_entry_costs) / sum(shrt_entry_amounts) * (1 - markup)
+
+after each new entry, the corresponding exit order's price and amount is updated
 
 if it runs out of btc for long entries, it will borrow btc, repaying after long position is filled
 
 inversely,
-it exits shorts by summing up all btc acquired from and all coin spent on short entries since previous full short exit,
-placing a big short bid whose price is sum(btc_acquired) / sum(coin_spent) * (1 - markup)
-
 when the short exit position is filled, it repays the coin debt
-
-the short exit bid is adjusted after each new short sell
-
-net profit per exit will depend on vip level
-
-
-interest paid on loans from exchange will also reduce profits
 
 ----------------------------------------------------------------------------------------
 
