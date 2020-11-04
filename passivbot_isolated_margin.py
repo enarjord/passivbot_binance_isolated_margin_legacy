@@ -97,7 +97,7 @@ class Bot:
                 [span * 60 for span in self.settings[s]['ema_spans_minutes']]
             if self.settings[s]['long'] or self.settings[s]['shrt']:
                 self.active_symbols.append(s)
-        for s in self.active_symbols:
+        for s in self.symbols:
             self.settings[s]['account_equity_pct_per_hour'] = \
                 (self.global_settings['max_entry_acc_val_pct_per_hour'] /
                  len(self.active_symbols) * 2)
