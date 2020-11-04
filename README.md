@@ -84,17 +84,17 @@ when the short exit position is filled, it repays the coin debt
 
 ----------------------------------------------------------------------------------------
 
-here follow example illustrations of behavior with ETH/BTC for two months
+here follow example illustrations of behavior
 
-blue dots are small long buys, red dots are big long sells, red line is long sell prices
+blue dots are small long buys, red dots are big long sells, blue line is long sell prices
 
-![long](/docs/ethbtc_long.png)
+![long](/docs/xmr_btc_long.png)
 
 
 
 red dots are small short sells, blue dots are big short buys, blue line is short buy prices
 
-![short](/docs/ethbtc_shrt.png/)
+![short](/docs/xmr_btc_shrt.png/)
 
 
 
