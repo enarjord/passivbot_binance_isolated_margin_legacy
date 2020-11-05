@@ -103,7 +103,7 @@ class Bot:
                  len(self.active_symbols) * 2)
             self.settings[s]['account_equity_pct_per_entry'] = \
                 (self.settings[s]['account_equity_pct_per_hour'] *
-                 self.settings[s]['min_entry_delay_hours'])
+                 self.settings[s]['min_entry_delay_hours']) / 2
         self.balance_log_filepath = \
             make_get_filepath(f"logs/binance/{self.user}/balance/")
         await self.cc.load_markets()
@@ -152,8 +152,8 @@ class Bot:
             if s not in self.balance or not self.balance[s]['equity']:
                 self.symbols.remove(s)
 
-        self.longs = {s: self.settings[s]['long'] for s in self.symbols}
-        self.shrts = {s: self.settings[s]['shrt'] for s in self.symbols}
+        self.longs = {s for s in self.symbols if self.settings[s]['long']}
+        self.shrts = {s for s in self.symbols if self.settings[s]['shrt']}
         self.ideal_orders = \
             {s: {'shrt_sel': {'symbol': s, 'side': 'sel', 'amount': 0.0, 'price': 0.0},
                  'shrt_buy': {'symbol': s, 'side': 'buy', 'amount': 0.0, 'price': 0.0},
@@ -985,7 +985,6 @@ class Bot:
                  (self.global_settings['max_entry_acc_val_pct_per_hour'] *
                   self.balance[s]['total_account_equity']))
             )
-            #print(s, 'shrt delay hours', delay_hours)
             if now_millis - self.my_trades_analysis[s]['last_shrt_entry_ts'] > \
                     (HOUR_TO_MILLIS * delay_hours):
                 shrt_sel_amount = round_up(entry_cost * shrt_amount_modifier / shrt_sel_price,
@@ -1062,8 +1061,6 @@ class Bot:
                  (self.global_settings['max_entry_acc_val_pct_per_hour'] *
                   self.balance[s]['total_account_equity']))
             )
-            #print(s, 'long delay hours', delay_hours)
-
             if now_millis - self.my_trades_analysis[s]['last_long_entry_ts'] > \
                     (HOUR_TO_MILLIS * delay_hours):
                 long_buy_amount = round_up(entry_cost * long_amount_modifier / long_buy_price,
@@ -1298,10 +1295,12 @@ class Bot:
         self.timestamps['locked']['distribute_btc']['distribute_btc'] = now
         amount = 0.0005
         quot_borrowable = sorted([(self.balance[s]['BTC']['borrowable'], s) for s in self.balance])
-        s_to = quot_borrowable[0][1]
+        s_to = [e[1] for e in quot_borrowable if e[1] in self.active_symbols][0]
         for e in quot_borrowable[::-1]:
             try:
                 s_from = e[1]
+                if s_from == s_to:
+                    continue
                 r = await self.transfer_from_isolated(s_from, 'BTC', amount)
                 if type(r) == dict:
                     print(f'transfered {amount} btc from {s_from}', r)
