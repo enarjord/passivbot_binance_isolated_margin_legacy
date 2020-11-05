@@ -26,7 +26,7 @@ def prep_df(ohlcvs: pd.DataFrame, settings: dict) -> pd.DataFrame:
     entry_ask = round_up(max_ema * (1 + entry_spread), precision)
     exit_bid = round_dn(min_ema, precision)
     exit_ask = round_up(max_ema, precision)
-    avg = ohlcvs[['open', 'high', 'low', 'close']].mean(axis=1)
+    avg = ohlcvs[['open', 'close']].mean(axis=1)
     df = pd.DataFrame({'entry_bid': entry_bid, 'entry_ask': entry_ask,
                        'exit_bid': exit_bid, 'exit_ask': exit_ask,
                        'avg': avg, 'high': ohlcvs.high, 'low': ohlcvs.low}, index=ohlcvs.index)
@@ -100,6 +100,8 @@ def backtest(df: pd.DataFrame, settings: dict):
     start_ts, end_ts = df.index[0], df.index[-1]
     ts_range = end_ts - start_ts
     k = 0
+    kn = len(df) // 2000
+    liquidation = False
 
     for row in df.itertuples():
         s = row.symbol
@@ -122,7 +124,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                                   n_days_to_min_markup)))
         long_exit_price = max(round_up(long_vwap * (1 + long_exit_markup), precisions[s]),
                               row.exit_ask)
-        if row.high > long_exit_price:
+        if settings['long'] and row.high > long_exit_price:
             coin_avbl = credit / row.avg + max(0.0, equity[coin])
             long_exit_amount = min(coin_avbl, long_amount[s])
             long_exit_cost = long_exit_amount * long_exit_price
@@ -132,7 +134,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                 trades[s].append({'timestamp': row.Index, 'side': 'sel', 'type': 'exit',
                                   'price': long_exit_price,
                                   'amount': long_exit_amount, 'cost': long_exit_cost,
-                                  'fee': long_exit_cost * fee})
+                                  'fee': long_exit_cost * (fee - 1) * -1})
                 if long_exit_amount < long_amount[s]:
                     # partial exit
                     long_cost[s] -= long_exit_cost
@@ -149,7 +151,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                                                                   n_days_to_min_markup)))
         shrt_exit_price = min(round_dn(shrt_vwap * (1 - shrt_exit_markup), precisions[s]),
                               row.exit_bid)
-        if row.low < shrt_exit_price:
+        if settings['shrt'] and row.low < shrt_exit_price:
             quot_avbl = credit + max(0.0, equity[quot])
             shrt_exit_amount = min(quot_avbl / shrt_exit_price, shrt_amount[s])
             shrt_exit_cost = shrt_exit_amount * shrt_exit_price
@@ -159,7 +161,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                 trades[s].append({'timestamp': row.Index, 'side': 'buy', 'type': 'exit',
                                   'price': shrt_exit_price,
                                   'amount': shrt_amount[s], 'cost': shrt_exit_cost,
-                                  'fee': shrt_exit_cost * fee})
+                                  'fee': shrt_exit_cost * (fee - 1) * -1})
                 if shrt_exit_amount < shrt_amount[s]:
                     # partial exit
                     shrt_cost[s] -= shrt_exit_cost
@@ -170,7 +172,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                     shrt_amount[s] = 0.0
 
         ##### long entry #####
-        if row.Index - prev_entry_ts['long'][s] >= entry_delay_millis:
+        if settings['long'] and row.Index - prev_entry_ts['long'][s] >= entry_delay_millis:
             if row.low < row.entry_bid:
                 long_entry_cost = entry_cost * max(1.0, min(min_exit_cost_multiplier / 2,
                                                             (long_vwap / row.entry_bid)**exponent))
@@ -185,10 +187,10 @@ def backtest(df: pd.DataFrame, settings: dict):
                                       'price': row.entry_bid,
                                       'long_vwap': long_cost[s] / long_amount[s],
                                       'amount': long_entry_amount, 'cost': long_entry_cost,
-                                      'fee': long_entry_cost * fee})
+                                      'fee': long_entry_cost * (fee - 1) * -1})
 
         ##### shrt entry #####
-        if row.Index - prev_entry_ts['shrt'][s] >= entry_delay_millis:
+        if settings['shrt'] and row.Index - prev_entry_ts['shrt'][s] >= entry_delay_millis:
             if row.high > row.entry_ask:
                 shrt_entry_cost = entry_cost * max(1.0, min(min_exit_cost_multiplier / 2,
                                                             (row.entry_ask / shrt_vwap)**exponent))
@@ -203,7 +205,7 @@ def backtest(df: pd.DataFrame, settings: dict):
                                       'price': row.entry_ask,
                                       'shrt_vwap': shrt_cost[s] / shrt_amount[s],
                                       'amount': shrt_entry_amount, 'cost': shrt_entry_cost,
-                                      'fee': shrt_entry_cost * fee})
+                                      'fee': shrt_entry_cost * (fee - 1) * -1})
 
         account_equity -= (equity_ito_quot[coin] + equity_ito_quot[quot])
         debt -= (min(0.0, equity_ito_quot[coin]) + min(0.0, equity_ito_quot[quot]))
@@ -213,14 +215,19 @@ def backtest(df: pd.DataFrame, settings: dict):
         account_equity += (equity_ito_quot[coin] + equity_ito_quot[quot])
         debt += (min(0.0, equity_ito_quot[coin]) + min(0.0, equity_ito_quot[quot]))
         onhand += (max(0.0, equity_ito_quot[coin]) + max(0.0, equity_ito_quot[quot]))
-        debt_neg = round(max(0.0, debt * -1), 4)
+        debt_neg = round(max(0.0, abs(debt)), 4)
         margin_level = min(5.0, onhand / debt_neg if debt_neg else 5.0)
         if margin_level < 1.05:
             print('\nliquidation!')
-            break
+            print(debt)
+            print(equity_ito_quot)
+            print(equity)
+            print(row)
+            liquidation = True
+            k = kn - 1
 
         k += 1
-        if k % 1000 == 0:
+        if k % kn == 0:
             log_entry = {**{'timestamp': row.Index, 'debt': debt_neg, 'onhand': onhand,
                             'credit': credit, 'margin_level': margin_level,
                             'equity': account_equity},
@@ -228,8 +235,12 @@ def backtest(df: pd.DataFrame, settings: dict):
             logs.append(log_entry)
             n_millis = row.Index - start_ts
             n_days = n_millis / (1000 * 60 * 60 * 24)
+            adg = account_equity ** (1 / n_days)
+            ayg = adg ** 365
             line = f'{n_millis / ts_range:.2f} margin_level, {margin_level:.2f}'
-            line += f' equity {account_equity:.4f} credit {credit:4f}'
+            line += f' equity {account_equity:.4f} credit {credit:4f} ayg {ayg:.6f}'
             sys.stdout.write('\r' + line + ' ' * 8)
+            if liquidation:
+                break
     return logs, trades
 
