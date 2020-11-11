@@ -19,22 +19,14 @@ usage:
 
 binance account needs isolated margin enabled for each symbol to trade
 
-add api key and secret as json file in dir
+add api key and secret as json file in dir `api_key_secret/binance/your_user_name.json`
 
-api_key_secret/binance/your_user_name.json
-
-formatted like this:
-
-`["KEY", "SECRET"]`
+formatted like this: `["KEY", "SECRET"]`
 
 
-if using non-default settings, make a copy of
+if using non-default settings, make a copy of `settings/binance_isolated_margin/default.json`
 
-settings/binance_isolated_margin/default.json
-
-rename the copy your_user_name.json
-
-and make changes
+rename the copy `your_user_name.json` and make changes
 
 otherwise, the bot will use default settings
 
@@ -43,12 +35,10 @@ it will use the account's trade history to make trading decisions
 if using an account with recent trade history and you wish to start fresh,
 consider changing "snapshot_timestamp_millis" from 0 to current unix time in milliseconds, see more below
 
-run in terminal:
-
-`python3.8 passivbot_isolated_margin.py your_user_name`
+run in terminal: `python3.8 passivbot_isolated_margin.py your_user_name`
 
 
-open with jupyter notebook backtesting_notes_shared_equity.ipynb for backtesting
+open `backtesting_notes_shared_equity.ipynb` with jupyter notebook for backtesting
 
 ------------------------------------------------------------------
 overview
@@ -56,8 +46,6 @@ overview
 the bot's purpose is to accumulate btc
 
 it can be used actively according to user's judgement of market conditions, but is designed and intended to work passively, i.e. "set and forget"
-
-a reasonably accurate backtester is included
 
 it simultaneously longs and shorts (optionally long only or short only) any btc quoted market
 
@@ -86,13 +74,13 @@ when the short exit position is filled, it repays the coin debt
 
 here follow example illustrations of behavior
 
-blue dots are small long buys, red dots are big long sells, red line is long entry vwap
+blue dots are small long buys, red dots are big long sells, red line is long entry vwap which resets after each exit
 
 ![long](/docs/xmr_btc_long.png)
 
 
 
-red dots are small short sells, blue dots are big short buys, blue line is short entry vwap
+red dots are small short sells, blue dots are big short buys, blue line is short entry vwap which resets after each exit
 
 ![short](/docs/xmr_btc_shrt.png/)
 
