@@ -15,6 +15,10 @@ dependencies, install with pip:
 
 ------------------------------------------------------------------
 
+released freely -- anybody may copy, redistribute, modify, use for commercial, non-commercial, educational or non-educational purposes, censor, denounce, or claim as one's own without permission from anybody
+
+------------------------------------------------------------------
+
 usage:
 
 binance account needs isolated margin enabled for each symbol to trade
@@ -41,6 +45,7 @@ run in terminal: `python3.8 passivbot_isolated_margin.py your_user_name`
 open `backtesting_notes_shared_equity.ipynb` with jupyter notebook for backtesting
 
 ------------------------------------------------------------------
+
 overview
 
 the bot's purpose is to accumulate btc
