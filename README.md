@@ -15,7 +15,7 @@ dependencies, install with pip:
 
 ------------------------------------------------------------------
 
-released freely -- anybody may copy, redistribute, modify, use for commercial, non-commercial, educational or non-educational purposes, censor or claim as one's own without permission from anybody
+released freely -- anybody may copy, redistribute, modify, use for commercial, non-commercial, educational or non-educational purposes, censor, claim as one's own or otherwise do or not do whatever without permission from anybody
 
 ------------------------------------------------------------------
 
