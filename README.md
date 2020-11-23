@@ -28,11 +28,9 @@ add api key and secret as json file in dir `api_key_secret/binance/your_user_nam
 formatted like this: `["KEY", "SECRET"]`
 
 
-if using non-default settings, make a copy of `settings/binance_isolated_margin/default.json`
+make a copy of `settings/binance_isolated_margin/default.json`
 
 rename the copy `your_user_name.json` and make changes
-
-otherwise, the bot will use default settings
 
 it will use the account's trade history to make trading decisions
 
