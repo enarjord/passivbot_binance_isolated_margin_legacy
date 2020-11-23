@@ -68,7 +68,7 @@ long_exit_price = sum(long_entry_costs) / sum(long_entry_amounts) * (1 + markup)
 
 shrt_exit_price = sum(shrt_entry_costs) / sum(shrt_entry_amounts) * (1 - markup)
 
-after each new entry, the corresponding exit order's price and amount is updated
+after each new entry, the corresponding exit order's price and amount are updated
 
 if it runs out of btc for long entries, it will borrow btc, repaying after long position is filled
 
