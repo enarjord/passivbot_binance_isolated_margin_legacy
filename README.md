@@ -63,7 +63,9 @@ it will look back in its own trade history to determine exit price and amount
 it exits positions in both directions at volume weighted average entry price with a given markup
 
 e.g.
+
 long_exit_price = sum(long_entry_costs) / sum(long_entry_amounts) * (1 + markup)
+
 shrt_exit_price = sum(shrt_entry_costs) / sum(shrt_entry_amounts) * (1 - markup)
 
 after each new entry, the corresponding exit order's price and amount is updated
