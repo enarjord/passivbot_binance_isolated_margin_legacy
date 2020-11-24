@@ -27,7 +27,8 @@
         "snapshot_timestamp_millis": 0
     },
     "global": {
-        "max_entry_acc_val_pct_per_hour": 0.001
+        "max_entry_acc_val_pct_per_hour": 0.001,
+        "auto_distribute_btc": true
     },
     "symbols": {
         "AAA/BTC": {
