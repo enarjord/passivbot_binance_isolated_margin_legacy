@@ -466,7 +466,8 @@ class Bot:
                 print_(['updating balance', symbol])
         balances = await tw(self.get_balance, args=(symbol,))
         await asyncio.create_task(tw(self.dump_balance_log))
-        await asyncio.create_task(tw(self.distribute_btc))
+        if self.global_settings['auto_distribute_btc']:
+            await asyncio.create_task(tw(self.distribute_btc))
         for s in balances:
             coin, quot = self.symbol_split[s]
             if s not in self.symbols:
