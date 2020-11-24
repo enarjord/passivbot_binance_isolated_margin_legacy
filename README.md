@@ -129,7 +129,7 @@ about the settings:
             "AAA/BTC": {
                 "long": true,
                 "shrt": false,
-                "max_leverage": 5                             # any value set here will override default setting
+                "max_leverage": 5                             # any key/value set under "symbols" will override corresponding default setting
             },
             "BBB/BTC": {
                 "min_markup_pct": 0.006,
@@ -139,7 +139,7 @@ about the settings:
                 "phase_out": true
             },
             "DDD/BTC": {},
-            "EEE/BTC": {                                      # will liquidate any holdings
+            "EEE/BTC": {                                      # if both long and shrt are false, will liquidate any holdings to btc over time
                 "long": false,
                 "shrt": false
             }
