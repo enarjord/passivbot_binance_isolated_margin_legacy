@@ -100,10 +100,10 @@ class Bot:
         for s in self.symbols:
             self.settings[s]['account_equity_pct_per_hour'] = \
                 (self.global_settings['max_entry_acc_val_pct_per_hour'] /
-                 len(self.active_symbols) * 2)
+                 len(self.active_symbols))
             self.settings[s]['account_equity_pct_per_entry'] = \
                 (self.settings[s]['account_equity_pct_per_hour'] *
-                 self.settings[s]['min_entry_delay_hours']) / 2
+                 self.settings[s]['min_entry_delay_hours'])
         self.balance_log_filepath = \
             make_get_filepath(f"logs/binance/{self.user}/balance/")
         await self.cc.load_markets()
@@ -1062,6 +1062,7 @@ class Bot:
                  (self.global_settings['max_entry_acc_val_pct_per_hour'] *
                   self.balance[s]['total_account_equity']))
             )
+
             if now_millis - self.my_trades_analysis[s]['last_long_entry_ts'] > \
                     (HOUR_TO_MILLIS * delay_hours):
                 long_buy_amount = round_up(entry_cost * long_amount_modifier / long_buy_price,
