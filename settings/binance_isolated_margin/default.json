@@ -17,22 +17,23 @@
         "entry_vol_modifier_exponent": 10,
         "long": false,
         "max_leverage": 10,
-        "max_markup_pct": 0.1,
+        "max_markup_pct": 0.14,
         "max_memory_span_days": 90,
         "min_exit_cost_multiplier": 10,
-        "min_markup_pct": 0.005,
-        "n_days_to_min_markup": 18,
+        "min_markup_pct": 0.0075,
+        "n_days_to_min_markup": 16,
         "phase_out": false,
         "shrt": false,
         "snapshot_timestamp_millis": 0
     },
     "global": {
-        "max_entry_acc_val_pct_per_hour": 0.001,
-        "auto_distribute_btc": true
+        "max_entry_acc_val_pct_per_hour": 0.0034,
+        "auto_distribute_btc": false
     },
     "symbols": {
-        "AAA/BTC": {
+        "XMR/BTC": {
             "long": true,
+            "phase_out": false,
             "shrt": true
         }
     },
